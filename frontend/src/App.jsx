@@ -80,10 +80,79 @@ function App() {
     setLoading(true);
 
     try {
-      const response = await axios.post(`${API_BASE_URL}/chat`, {
-        message: userMessage,
+      // Create initial empty AI message
+      setMessages((prev) => [...prev, { role: 'ai', content: '', steps: [] }]);
+
+      const response = await fetch(`${API_BASE_URL}/chat`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: userMessage }),
       });
-      setMessages((prev) => [...prev, { role: 'ai', content: response.data.response, steps: response.data.steps }]);
+
+      if (!response.ok) throw new Error(response.statusText);
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+
+        // Process all complete lines
+        for (let i = 0; i < lines.length - 1; i++) {
+          const line = lines[i].trim();
+          if (!line) continue;
+
+          try {
+            const data = JSON.parse(line);
+            setMessages(prev => {
+              const newMessages = [...prev];
+              // We need to clone the last message to avoid direct mutation issues
+              // But React state updates are batched, so we must be careful.
+              // Here we assume newMessages is a fresh array matching current state.
+              const lastMsgIndex = newMessages.length - 1;
+              const lastMsg = { ...newMessages[lastMsgIndex] };
+
+              if (data.type === 'token') {
+                lastMsg.content = (lastMsg.content || '') + data.content;
+              } else if (data.type === 'tool_start') {
+                if (!lastMsg.steps) lastMsg.steps = [];
+                lastMsg.steps = [...lastMsg.steps, {
+                  tool: data.tool,
+                  input: data.input,
+                  output: 'Running...'
+                }];
+              } else if (data.type === 'tool_end') {
+                if (lastMsg.steps) {
+                  const steps = [...lastMsg.steps];
+                  // Find the last step with matching tool name
+                  // (simplistic matching, ideally use ID)
+                  let found = false;
+                  for (let j = steps.length - 1; j >= 0; j--) {
+                    if (steps[j].tool === data.tool && steps[j].output === 'Running...') {
+                      steps[j] = { ...steps[j], output: data.output };
+                      found = true;
+                      break;
+                    }
+                  }
+                  lastMsg.steps = steps;
+                }
+              }
+              newMessages[lastMsgIndex] = lastMsg;
+              return newMessages;
+            });
+          } catch (e) {
+            console.error('Error parsing stream line:', e);
+          }
+        }
+        // Keep the incomplete last line in buffer
+        buffer = lines[lines.length - 1];
+      }
+
     } catch (err) {
       setMessages((prev) => [...prev, { role: 'error', content: 'An error occurred while processing your request.' }]);
       console.error(err);

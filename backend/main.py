@@ -1,4 +1,5 @@
 from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import shutil
@@ -58,8 +59,10 @@ async def upload_file(file: UploadFile = File(...)):
 @app.post("/chat")
 async def chat(request: ChatRequest):
     try:
-        result = agent.process_question(request.message, request.thread_id)
-        return result
+        return StreamingResponse(
+            agent.stream_question(request.message, request.thread_id),
+            media_type="application/x-ndjson"
+        )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

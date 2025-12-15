@@ -56,47 +56,46 @@ from langchain_core.messages import AIMessage, ToolMessage
 
 # ... imports ...
 
-def process_question(user_question: str, thread_id: str = "1"):
+import json
+
+# ... (keep existing imports)
+
+async def stream_question(user_question: str, thread_id: str = "1"):
     """
-    Process a user question using the agent and return response + reasoning steps.
+    Streams events (tool usage, response tokens) from the agent.
     """
     config = {"configurable": {"thread_id": thread_id}}
     
-    events = agent_executor.stream(
+    # Use astream_events to get granular updates including tokens
+    async for event in agent_executor.astream_events(
         {"messages": [("user", user_question)]},
         config,
-        stream_mode="values"
-    )
-
-    final_response = ""
-    messages = []
-    
-    # Iterate through stream to get the final state
-    for event in events:
-        if "messages" in event:
-            messages = event["messages"]
-            final_response = messages[-1].content
-    
-    # Extract steps from messages
-    steps = []
-    for i, msg in enumerate(messages):
-        if isinstance(msg, AIMessage) and msg.tool_calls:
-            for tool_call in msg.tool_calls:
-                step = {
-                    "type": "tool_call",
-                    "tool": tool_call["name"],
-                    "input": tool_call["args"],
-                    "output": "Pending..."
-                }
-                # Look ahead for the corresponding ToolMessage
-                # (Simple heuristic: usually the next message(s) are tool outputs)
-                for next_msg in messages[i+1:]:
-                    if isinstance(next_msg, ToolMessage) and next_msg.tool_call_id == tool_call["id"]:
-                        step["output"] = next_msg.content
-                        break
-                steps.append(step)
-
-    return {
-        "response": final_response,
-        "steps": steps
-    }
+        version="v1"
+    ):
+        kind = event["event"]
+        
+        # Stream Tokens
+        if kind == "on_chat_model_stream":
+            content = event["data"]["chunk"].content
+            if content:
+                yield json.dumps({"type": "token", "content": content}) + "\n"
+                
+        # Tool Start
+        elif kind == "on_tool_start":
+            # Filter out internal tools or check name if needed
+            if event["name"] not in ["_Exception"]:
+                yield json.dumps({
+                    "type": "tool_start", 
+                    "tool": event["name"], 
+                    "input": event["data"].get("input")
+                }) + "\n"
+                
+        # Tool End
+        elif kind == "on_tool_end":
+            if event["name"] not in ["_Exception"]:
+                output = str(event["data"].get("output"))
+                yield json.dumps({
+                    "type": "tool_end", 
+                    "tool": event["name"],
+                    "output": output
+                }) + "\n"
