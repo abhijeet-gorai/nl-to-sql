@@ -531,31 +531,36 @@ function App() {
                 </div>
               )}
 
-              {messages.map((msg, idx) => (
-                <div key={idx} className="message">
-                  <div className={`avatar ${msg.role}`}>
-                    {msg.role === 'user' ? <User size={20} /> : <Cpu size={20} />}
-                  </div>
-                  <div className="msg-body">
-                    <div className="msg-role-name">{msg.role === 'user' ? 'You' : 'Assistant'}</div>
-                    <div className="msg-content">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+              {messages.map((msg, idx) => {
+                // Check if this is an AI message that hasn't received content yet
+                const isThinking = msg.role === 'ai' && !msg.content && (!msg.steps || msg.steps.length === 0);
+
+                return (
+                  <div key={idx} className="message">
+                    <div className={`avatar ${msg.role}`}>
+                      {msg.role === 'user' ? <User size={20} /> : <Cpu size={20} />}
                     </div>
-                    {msg.steps && msg.steps.length > 0 && (
-                      <ReasoningAccordion steps={msg.steps} />
-                    )}
+                    <div className="msg-body">
+                      <div className="msg-role-name">{msg.role === 'user' ? 'You' : 'Assistant'}</div>
+
+                      {isThinking ? (
+                        <div className="typing-indicator">
+                          <span></span><span></span><span></span>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="msg-content">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                          </div>
+                          {msg.steps && msg.steps.length > 0 && (
+                            <ReasoningAccordion steps={msg.steps} />
+                          )}
+                        </>
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
-              {loading && (
-                <div className="message">
-                  <div className="avatar ai"><Cpu size={20} /></div>
-                  <div className="msg-body">
-                    <div className="msg-role-name">Assistant</div>
-                    <div className="typing-indicator" style={{ color: 'var(--text-tertiary)', fontSize: '0.9rem' }}>Thinking...</div>
-                  </div>
-                </div>
-              )}
+                );
+              })}
               <div ref={messagesEndRef} />
             </div>
 
