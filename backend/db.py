@@ -118,6 +118,28 @@ def register_table(file_path: str, metadata: Dict):
     except Exception as e:
         raise Exception(f"Failed to register table: {str(e)}")
 
+def delete_table(table_name: str) -> bool:
+    """
+    Drops the table and removes its metadata.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    try:
+        # Drop table
+        cursor.execute(f"DROP TABLE IF EXISTS {table_name}")
+        
+        # Remove metadata
+        cursor.execute(f"DELETE FROM {METADATA_TABLE} WHERE table_name = ?", (table_name,))
+        
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"Failed to delete table {table_name}: {e}")
+        return False
+    finally:
+        conn.close()
+
 def get_all_tables() -> List[Dict]:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row

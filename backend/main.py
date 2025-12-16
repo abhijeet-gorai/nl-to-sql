@@ -95,10 +95,14 @@ async def register_table(request: RegisterRequest):
 
 @app.get("/tables")
 async def get_tables():
-    try:
-        return db.get_all_tables()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    return db.get_all_tables()
+
+@app.delete("/tables/{table_name}")
+async def delete_table(table_name: str):
+    success = db.delete_table(table_name)
+    if not success:
+         raise HTTPException(status_code=500, detail="Failed to delete table")
+    return {"status": "success", "table_name": table_name}
 
 @app.post("/chat")
 async def chat(request: ChatRequest):

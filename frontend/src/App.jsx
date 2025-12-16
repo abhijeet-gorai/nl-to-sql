@@ -4,7 +4,7 @@ import remarkGfm from 'remark-gfm';
 import {
   Database, Send, Upload, Sun, Moon,
   Check, ChevronRight, ChevronDown,
-  Terminal, Play, Cpu, Sparkles, User
+  Terminal, Play, Cpu, Sparkles, User, Trash2
 } from 'lucide-react';
 import './index.css';
 
@@ -25,8 +25,12 @@ function App() {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
 
+
   const messagesEndRef = useRef(null);
   const [threadId, setThreadId] = useState("default");
+
+  // Modal State
+  const [deleteConfirm, setDeleteConfirm] = useState({ isOpen: false, tableName: '' });
 
   // --- Effects ---
   useEffect(() => {
@@ -127,12 +131,49 @@ function App() {
       setStagingMetadata(null);
 
     } catch (err) {
-      console.error(err);
-      alert("Failed to register table.");
+      alert(err.message);
     }
   };
 
+  const handleDeleteTable = (e, tableName) => {
+    e.stopPropagation();
+    setDeleteConfirm({ isOpen: true, tableName });
+  };
+
+  const proceedWithDelete = async () => {
+    const tableName = deleteConfirm.tableName;
+    if (!tableName) return;
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/tables/${tableName}`, {
+        method: 'DELETE'
+      });
+      if (!res.ok) throw new Error("Failed to delete table");
+
+      await fetchTables();
+      setSelectedTableIds(prev => prev.filter(id => id !== tableName));
+
+      if (selectedTableIds.includes(tableName) && selectedTableIds.length === 1) {
+        setView('empty');
+      }
+      setDeleteConfirm({ isOpen: false, tableName: '' });
+
+    } catch (err) {
+      alert(err.message);
+      setDeleteConfirm({ isOpen: false, tableName: '' });
+    }
+  };
+
+
+
   const handleTableToggle = (tableName) => {
+    // Ensure the table actually exists in the current `tables` state before toggling
+    const tableExists = tables.some(table => table.table_name === tableName);
+    if (!tableExists) {
+      console.warn(`Attempted to toggle non-existent table: ${tableName}`);
+      return;
+    }
+
     setSelectedTableIds(prev => {
       if (prev.includes(tableName)) {
         return prev.filter(t => t !== tableName);
@@ -297,10 +338,41 @@ function App() {
     );
   };
 
+  // New: Confirmation Modal
+  const ConfirmationModal = ({ isOpen, title, message, onConfirm, onCancel, confirmText = "Confirm", isDanger = false }) => {
+    if (!isOpen) return null;
+    return (
+      <div className="modal-overlay" onClick={onCancel}>
+        <div className="modal-content" onClick={e => e.stopPropagation()}>
+          <div className="modal-header">
+            <div className="modal-title">{title}</div>
+            <div className="modal-desc">{message}</div>
+          </div>
+          <div className="modal-actions">
+            <button className="btn btn-ghost" onClick={onCancel}>Cancel</button>
+            <button className={`btn ${isDanger ? 'btn-danger' : 'btn-primary'}`} onClick={onConfirm}>
+              {confirmText}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   // --- Render ---
   return (
     <div className="app-container">
       {isUploading && <AnalyzingOverlay />}
+
+      <ConfirmationModal
+        isOpen={deleteConfirm.isOpen}
+        title="Delete Dataset"
+        message={`Are you sure you want to permanently delete "${deleteConfirm.tableName}"? This action cannot be undone.`}
+        confirmText="Delete"
+        isDanger={true}
+        onConfirm={proceedWithDelete}
+        onCancel={() => setDeleteConfirm({ isOpen: false, tableName: '' })}
+      />
 
       {/* Sidebar */}
       <aside className="sidebar">
@@ -335,6 +407,13 @@ function App() {
                 <div className="nav-item-title">{table.table_name}</div>
                 <div className="nav-item-sub">{table.description || "No description"}</div>
               </div>
+              <button
+                className="icon-btn delete-btn"
+                onClick={(e) => handleDeleteTable(e, table.table_name)}
+                title="Delete Table"
+              >
+                <Trash2 size={14} />
+              </button>
             </div>
           ))}
         </div>
