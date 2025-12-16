@@ -1,92 +1,174 @@
-import React, { useState, useRef, useEffect } from 'react';
-import axios from 'axios';
+import React, { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Upload, FileText, Send, Database, Loader2, AlertCircle, X } from 'lucide-react';
+import {
+  Database, Send, Upload, Sun, Moon,
+  Check, ChevronRight, ChevronDown,
+  Terminal, Play, Cpu, Sparkles, User
+} from 'lucide-react';
 import './index.css';
 
 const API_BASE_URL = 'http://localhost:8000';
 
 function App() {
-  const [file, setFile] = useState(null);
-  const [schema, setSchema] = useState(null);
-  const [messages, setMessages] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [uploading, setUploading] = useState(false);
-  const [error, setError] = useState(null);
-  const [input, setInput] = useState('');
-  const messagesEndRef = useRef(null);
+  // --- State ---
+  const [theme, setTheme] = useState('dark');
+  const [view, setView] = useState('empty'); // 'empty', 'edit-metadata', 'chat'
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
+  const [tables, setTables] = useState([]);
+  const [selectedTableIds, setSelectedTableIds] = useState([]);
+
+  const [stagingMetadata, setStagingMetadata] = useState(null);
+  const [isUploading, setIsUploading] = useState(false);
+
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const messagesEndRef = useRef(null);
+  const [threadId, setThreadId] = useState("default");
+
+  // --- Effects ---
+  useEffect(() => {
+    setThreadId(Math.random().toString(36).substring(7));
+    document.documentElement.setAttribute('data-theme', theme);
+  }, []);
 
   useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
+    document.documentElement.setAttribute('data-theme', theme);
+  }, [theme]);
 
-  const handleDragOver = (e) => {
-    e.preventDefault();
-  };
+  useEffect(() => {
+    fetchTables();
+  }, []);
 
-  const handleDrop = (e) => {
-    e.preventDefault();
-    const droppedFile = e.dataTransfer.files[0];
-    validateAndSetFile(droppedFile);
-  };
+  useEffect(() => {
+    // Only scroll if we are in chat view and messages exist
+    if (view === 'chat') {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages, view]);
 
-  const handleFileSelect = (e) => {
-    const selectedFile = e.target.files[0];
-    validateAndSetFile(selectedFile);
-  };
+  // --- Actions ---
+  const toggleTheme = () => setTheme(prev => prev === 'dark' ? 'light' : 'dark');
 
-  const validateAndSetFile = (selectedFile) => {
-    if (selectedFile && selectedFile.type === 'text/csv') {
-      setFile(selectedFile);
-      setError(null);
-      handleUpload(selectedFile);
-    } else {
-      setError('Please upload a valid CSV file.');
+  const fetchTables = async () => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/tables`);
+      if (res.ok) {
+        const data = await res.json();
+        setTables(data);
+      }
+    } catch (e) {
+      console.error("Failed to fetch tables", e);
     }
   };
 
-  const handleUpload = async (fileToUpload) => {
-    setUploading(true);
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    setIsUploading(true);
     const formData = new FormData();
-    formData.append('file', fileToUpload);
+    formData.append('file', file);
 
     try {
-      const response = await axios.post(`${API_BASE_URL}/upload`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
+      // Simulate a small delay for better UX if API is too fast
+      const [res] = await Promise.all([
+        fetch(`${API_BASE_URL}/analyze`, { method: 'POST', body: formData }),
+        new Promise(resolve => setTimeout(resolve, 800))
+      ]);
+
+      if (!res.ok) throw new Error("Analysis failed");
+
+      const data = await res.json();
+
+      setStagingMetadata({
+        ...data,
+        table_name: data.suggested_table_name,
+        columns: data.columns
       });
-      setSchema(response.data.schema);
-      setMessages([{ role: 'system', content: `File "${fileToUpload.name}" uploaded successfully. You can now ask questions about your data.` }]);
+      setView('edit-metadata');
+
     } catch (err) {
-      setError('Failed to upload file. Please try again.');
       console.error(err);
-      setFile(null);
+      alert("Failed to upload/analyze file.");
     } finally {
-      setUploading(false);
+      setIsUploading(false);
+      e.target.value = null; // Reset input
     }
+  };
+
+  const handleRegister = async () => {
+    if (!stagingMetadata) return;
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          file_path: stagingMetadata.file_path,
+          metadata: {
+            table_name: stagingMetadata.table_name,
+            original_filename: stagingMetadata.original_filename,
+            description: stagingMetadata.description,
+            columns: stagingMetadata.columns
+          }
+        })
+      });
+
+      if (!res.ok) throw new Error("Registration failed");
+
+      const result = await res.json();
+      await fetchTables();
+
+      setSelectedTableIds(prev => [...prev, result.table_name]);
+      setView('chat');
+      setStagingMetadata(null);
+
+    } catch (err) {
+      console.error(err);
+      alert("Failed to register table.");
+    }
+  };
+
+  const handleTableToggle = (tableName) => {
+    setSelectedTableIds(prev => {
+      if (prev.includes(tableName)) {
+        return prev.filter(t => t !== tableName);
+      } else {
+        return [...prev, tableName];
+      }
+    });
+    // If we are in empty view and select a table, switch to chat
+    if (view === 'empty') setView('chat');
   };
 
   const handleSendMessage = async (e) => {
     e.preventDefault();
     if (!input.trim() || loading) return;
 
+    if (selectedTableIds.length === 0) {
+      alert("Please select at least one table.");
+      return;
+    }
+
     const userMessage = input;
     setInput('');
-    setMessages((prev) => [...prev, { role: 'user', content: userMessage }]);
+    setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
     setLoading(true);
 
     try {
-      // Create initial empty AI message
-      setMessages((prev) => [...prev, { role: 'ai', content: '', steps: [] }]);
+      setMessages(prev => [...prev, { role: 'ai', content: '', steps: [] }]);
 
       const response = await fetch(`${API_BASE_URL}/chat`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: userMessage }),
+        body: JSON.stringify({
+          message: userMessage,
+          selected_tables: selectedTableIds,
+          thread_id: threadId
+        })
       });
 
       if (!response.ok) throw new Error(response.statusText);
@@ -102,7 +184,6 @@ function App() {
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split('\n');
 
-        // Process all complete lines
         for (let i = 0; i < lines.length - 1; i++) {
           const line = lines[i].trim();
           if (!line) continue;
@@ -111,9 +192,6 @@ function App() {
             const data = JSON.parse(line);
             setMessages(prev => {
               const newMessages = [...prev];
-              // We need to clone the last message to avoid direct mutation issues
-              // But React state updates are batched, so we must be careful.
-              // Here we assume newMessages is a fresh array matching current state.
               const lastMsgIndex = newMessages.length - 1;
               const lastMsg = { ...newMessages[lastMsgIndex] };
 
@@ -129,13 +207,9 @@ function App() {
               } else if (data.type === 'tool_end') {
                 if (lastMsg.steps) {
                   const steps = [...lastMsg.steps];
-                  // Find the last step with matching tool name
-                  // (simplistic matching, ideally use ID)
-                  let found = false;
                   for (let j = steps.length - 1; j >= 0; j--) {
                     if (steps[j].tool === data.tool && steps[j].output === 'Running...') {
                       steps[j] = { ...steps[j], output: data.output };
-                      found = true;
                       break;
                     }
                   }
@@ -145,179 +219,297 @@ function App() {
               newMessages[lastMsgIndex] = lastMsg;
               return newMessages;
             });
-          } catch (e) {
-            console.error('Error parsing stream line:', e);
-          }
+          } catch (e) { console.error(e); }
         }
-        // Keep the incomplete last line in buffer
         buffer = lines[lines.length - 1];
       }
-
     } catch (err) {
-      setMessages((prev) => [...prev, { role: 'error', content: 'An error occurred while processing your request.' }]);
+      setMessages(prev => [...prev, { role: 'error', content: 'Sorry, I encountered an error processing your request.' }]);
       console.error(err);
     } finally {
       setLoading(false);
     }
   };
 
-  return (
-    <div className="app-container">
-      <div className="background-shapes">
-        <div className="shape shape-1"></div>
-        <div className="shape shape-2"></div>
+  // --- Sub-components ---
+
+  const AnalyzingOverlay = () => (
+    <div className="overlay">
+      <div className="loader-box">
+        <div className="spinner"></div>
+        <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>Analyzing Dataset</div>
+        <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Extracting schema and metadata...</div>
       </div>
+    </div>
+  );
 
-      <main className="main-content">
-        <header className="header">
-          <h1 className="logo">
-            <Database className="logo-icon" />
-            DataTalk <span className="logo-highlight">AI</span>
-          </h1>
-          <p className="subtitle">Transform your CSV data into insights with natural language.</p>
-        </header>
+  // New: Individual Step Item
+  const StepItem = ({ step }) => {
+    const [isExpanded, setIsExpanded] = useState(false);
 
-        <div className="grid-layout">
-          {/* Left Panel: Upload & Schema */}
-          <div className="panel left-panel">
-            <div
-              className={`upload-zone ${file ? 'active' : ''}`}
-              onDragOver={handleDragOver}
-              onDrop={handleDrop}
-              onClick={() => document.getElementById('fileInput').click()}
-            >
-              <input
-                type="file"
-                id="fileInput"
-                accept=".csv"
-                hidden
-                onChange={handleFileSelect}
-              />
-              {uploading ? (
-                <div className="upload-status">
-                  <Loader2 className="animate-spin" size={48} />
-                  <p>Processing data...</p>
-                </div>
-              ) : file ? (
-                <div className="file-info">
-                  <FileText size={48} className="file-icon" />
-                  <div className="file-details">
-                    <p className="filename">{file.name}</p>
-                    <p className="filesize">{(file.size / 1024).toFixed(1)} KB</p>
-                  </div>
-                  <button
-                    className="remove-file"
-                    onClick={(e) => { e.stopPropagation(); setFile(null); setSchema(null); }}
-                  >
-                    <X size={20} />
-                  </button>
-                </div>
-              ) : (
-                <div className="upload-prompt">
-                  <Upload size={48} className="upload-icon" />
-                  <p className="upload-text">Drag & drop your CSV here</p>
-                  <p className="upload-subtext">or click to browse</p>
-                </div>
-              )}
+    return (
+      <div className="step-item">
+        <div className="step-header" onClick={() => setIsExpanded(!isExpanded)}>
+          <div style={{ transition: 'transform 0.2s', transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)', display: 'flex' }}>
+            <ChevronRight size={14} color="var(--text-tertiary)" />
+          </div>
+          <div className="step-icon">
+            <Terminal size={14} />
+          </div>
+          <span className="step-title">{step.tool}</span>
+        </div>
+
+        {isExpanded && (
+          <div className="step-details">
+            <div className="step-label">Input</div>
+            <div className="step-code-block">
+              {typeof step.input === 'object' ? JSON.stringify(step.input, null, 2) : step.input}
             </div>
 
-            {error && (
-              <div className="error-message">
-                <AlertCircle size={20} />
-                <span>{error}</span>
-              </div>
-            )}
-
-            {schema && (
-              <div className="schema-viewer glass-card">
-                <h3><Database size={18} /> Data Schema</h3>
-                <div className="schema-scroll">
-                  <h4>Columns ({schema.columns.length})</h4>
-                  <div className="tags">
-                    {schema.columns.map((col) => (
-                      <span key={col} className="tag">{col}</span>
-                    ))}
-                  </div>
-                  <div className="row-count">
-                    Total Rows: <strong>{schema.row_count}</strong>
-                  </div>
-                </div>
-              </div>
-            )}
+            <div className="step-label">Result</div>
+            <div className="step-code-block">
+              {step.output}
+            </div>
           </div>
+        )}
+      </div>
+    );
+  };
 
-          {/* Right Panel: Chat Interface */}
-          <div className="panel right-panel glass-card">
-            <div className="chat-history">
-              {messages.length === 0 ? (
-                <div className="empty-state">
-                  <h3>Start the conversation</h3>
-                  <p>Upload a CSV file and ask questions like:</p>
-                  <ul>
-                    <li>"Show me the top 5 distinct values in column X"</li>
-                    <li>"What is the average of column Y?"</li>
-                    <li>"List all rows where Z is greater than 100"</li>
-                  </ul>
+  // Updated: Main Accordion
+  const ReasoningAccordion = ({ steps }) => {
+    const [isOpen, setIsOpen] = useState(false);
+
+    return (
+      <div className="reasoning-block">
+        <div className="reasoning-header" onClick={() => setIsOpen(!isOpen)}>
+          {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+          <span>View Reasoning Process ({steps.length} steps)</span>
+        </div>
+        {isOpen && (
+          <div className="reasoning-content">
+            {steps.map((step, i) => (
+              <StepItem key={i} step={step} />
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  // --- Render ---
+  return (
+    <div className="app-container">
+      {isUploading && <AnalyzingOverlay />}
+
+      {/* Sidebar */}
+      <aside className="sidebar">
+        <div className="brand">
+          <Database size={24} color="var(--accent-primary)" />
+          <span className="brand-text">DataTalk</span>
+        </div>
+
+        <label className="upload-label">
+          <Upload size={16} />
+          <span>New Import</span>
+          <input type="file" hidden accept=".csv" onChange={handleFileUpload} />
+        </label>
+
+        <div className="section-label">Datasets</div>
+        <div className="table-list">
+          {tables.length === 0 && (
+            <div style={{ padding: '0 0.5rem', color: 'var(--text-tertiary)', fontSize: '0.85rem' }}>
+              No data loaded yet.
+            </div>
+          )}
+          {tables.map(table => (
+            <div
+              key={table.id}
+              className={`nav-item ${selectedTableIds.includes(table.table_name) ? 'active' : ''}`}
+              onClick={() => handleTableToggle(table.table_name)}
+            >
+              <div className="nav-item-icon">
+                {selectedTableIds.includes(table.table_name) ? <Check size={16} /> : <Database size={16} />}
+              </div>
+              <div className="nav-item-info">
+                <div className="nav-item-title">{table.table_name}</div>
+                <div className="nav-item-sub">{table.description || "No description"}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="sidebar-footer">
+          <div style={{ fontSize: '0.8rem', color: 'var(--text-tertiary)' }}>
+            v1.0.0
+          </div>
+          <button className="icon-btn" onClick={toggleTheme} title="Toggle Theme">
+            {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
+          </button>
+        </div>
+      </aside>
+
+      {/* Main Content */}
+      <main className="main-content">
+
+        {/* VIEW: Metadata Editor */}
+        {view === 'edit-metadata' && stagingMetadata && (
+          <div className="editor-wrapper">
+            <div className="editor-card">
+              <div className="editor-header">
+                <div>
+                  <h2 style={{ fontSize: '1.25rem', fontWeight: 700 }}>Metadata Configuration</h2>
+                  <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Review and enrich your dataset before analyzing.</p>
                 </div>
-              ) : (
-                messages.map((msg, index) => (
-                  <div key={index} className={`message ${msg.role}`}>
-                    <div className="message-content">
-                      {msg.role === 'ai' && <div className="message-header">AI Response</div>}
-                      <div className="message-text">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
-                      </div>
-                      {msg.steps && msg.steps.length > 0 && (
-                        <div className="reasoning-accordion">
-                          <details>
-                            <summary>View Reasoning Steps</summary>
-                            <div className="steps-list">
-                              {msg.steps.map((step, i) => (
-                                <div key={i} className="step-item">
-                                  <div className="step-tool">Tools: <code>{step.tool}</code></div>
-                                  <div className="step-input">Input: <code>{JSON.stringify(step.input)}</code></div>
-                                  <div className="step-output">Output: <pre>{step.output}</pre></div>
-                                </div>
-                              ))}
-                            </div>
-                          </details>
-                        </div>
-                      )}
-                    </div>
+              </div>
+
+              <div className="editor-body">
+                <div className="editor-row">
+                  <div className="field-group">
+                    <label className="field-label">Table Name</label>
+                    <input
+                      className="input-text"
+                      value={stagingMetadata.table_name}
+                      onChange={(e) => setStagingMetadata({ ...stagingMetadata, table_name: e.target.value })}
+                    />
                   </div>
-                ))
+                  <div className="field-group">
+                    <label className="field-label">Original Filename</label>
+                    <input className="input-text" value={stagingMetadata.original_filename} disabled style={{ opacity: 0.6 }} />
+                  </div>
+                </div>
+
+                <div className="field-group">
+                  <label className="field-label">Description</label>
+                  <textarea
+                    className="input-area"
+                    rows={2}
+                    value={stagingMetadata.description}
+                    onChange={(e) => setStagingMetadata({ ...stagingMetadata, description: e.target.value })}
+                    placeholder="What does this dataset contain?"
+                  />
+                </div>
+
+                <div className="columns-header">
+                  {stagingMetadata.columns.length} Columns Detected
+                </div>
+
+                <div className="column-list">
+                  {stagingMetadata.columns.map((col, idx) => (
+                    <div key={idx} className="column-row">
+                      <div className="col-meta">
+                        <div className="col-name">{col.name}</div>
+                        <div className="col-type">{col.type}</div>
+                      </div>
+                      <textarea
+                        className="col-desc-input"
+                        placeholder="Add a description for this column..."
+                        rows={2}
+                        value={col.description}
+                        onChange={(e) => {
+                          const newCols = [...stagingMetadata.columns];
+                          newCols[idx].description = e.target.value;
+                          setStagingMetadata({ ...stagingMetadata, columns: newCols });
+                        }}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="editor-footer">
+                <button className="btn btn-ghost" onClick={() => { setStagingMetadata(null); setView('empty'); }}>
+                  Cancel
+                </button>
+                <button className="btn btn-primary" onClick={handleRegister}>
+                  <Check size={18} />
+                  Complete Registration
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* VIEW: Chat */}
+        {view === 'chat' && (
+          <div className="chat-wrapper">
+            <div className="chat-header">
+              <div className="chat-title">
+                <Sparkles size={18} color="var(--accent-primary)" />
+                <span>Data Assistant</span>
+              </div>
+              <div className="chat-badge">
+                {selectedTableIds.length} Contexts Active
+              </div>
+            </div>
+
+            <div className="chat-area">
+              {messages.length === 0 && (
+                <div className="empty-state">
+                  <div className="empty-icon"><Database size={32} /></div>
+                  <h3 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: '0.5rem' }}>Ready to Analyze</h3>
+                  <p style={{ maxWidth: 400 }}>Ask questions about your selected datasets. I can run SQL queries and visualize data for you.</p>
+                </div>
               )}
+
+              {messages.map((msg, idx) => (
+                <div key={idx} className="message">
+                  <div className={`avatar ${msg.role}`}>
+                    {msg.role === 'user' ? <User size={20} /> : <Cpu size={20} />}
+                  </div>
+                  <div className="msg-body">
+                    <div className="msg-role-name">{msg.role === 'user' ? 'You' : 'Assistant'}</div>
+                    <div className="msg-content">
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                    </div>
+                    {msg.steps && msg.steps.length > 0 && (
+                      <ReasoningAccordion steps={msg.steps} />
+                    )}
+                  </div>
+                </div>
+              ))}
               {loading && (
-                <div className="message ai loading">
-                  <div className="typing-indicator">
-                    <span></span>
-                    <span></span>
-                    <span></span>
+                <div className="message">
+                  <div className="avatar ai"><Cpu size={20} /></div>
+                  <div className="msg-body">
+                    <div className="msg-role-name">Assistant</div>
+                    <div className="typing-indicator" style={{ color: 'var(--text-tertiary)', fontSize: '0.9rem' }}>Thinking...</div>
                   </div>
                 </div>
               )}
               <div ref={messagesEndRef} />
             </div>
 
-            <form className="chat-input-area" onSubmit={handleSendMessage}>
-              <input
-                type="text"
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                placeholder={file ? "Ask a question about your data..." : "Please upload a file first..."}
-                disabled={!file || loading}
-                className="chat-input"
-              />
-              <button
-                type="submit"
-                className="send-button"
-                disabled={!file || loading || !input.trim()}
-              >
-                <Send size={20} />
-              </button>
-            </form>
+            <div className="input-wrapper">
+              <form className="input-container" onSubmit={handleSendMessage}>
+                <input
+                  className="chat-input"
+                  placeholder="Ask a question about your data..."
+                  value={input}
+                  onChange={e => setInput(e.target.value)}
+                  disabled={loading}
+                />
+                <button className="send-button" disabled={loading || !input.trim()}>
+                  <Send size={18} />
+                </button>
+              </form>
+            </div>
           </div>
-        </div>
+        )}
+
+        {/* VIEW: Empty */}
+        {view === 'empty' && (
+          <div className="empty-state">
+            <div className="empty-icon"><Database size={32} /></div>
+            <h2 style={{ fontSize: '1.5rem', fontWeight: 700, marginBottom: '1rem' }}>Welcome to DataTalk</h2>
+            <p style={{ maxWidth: 500, lineHeight: 1.6 }}>
+              Upload a CSV file using the button in the sidebar to get started.
+              <br />
+              Once uploaded, you can select it to begin a conversation.
+            </p>
+          </div>
+        )}
+
       </main>
     </div>
   );

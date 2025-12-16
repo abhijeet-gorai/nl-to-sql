@@ -1,7 +1,8 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Body
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from typing import List, Dict, Optional, Any
 import shutil
 import os
 import uuid
@@ -29,10 +30,15 @@ async def startup_event():
 
 class ChatRequest(BaseModel):
     message: str
+    selected_tables: List[str] = []
     thread_id: str = "default"
 
-@app.post("/upload")
-async def upload_file(file: UploadFile = File(...)):
+class RegisterRequest(BaseModel):
+    file_path: str
+    metadata: Dict[str, Any]
+
+@app.post("/analyze")
+async def analyze_file(file: UploadFile = File(...)):
     if not file.filename.endswith('.csv'):
         raise HTTPException(status_code=400, detail="Only CSV files are allowed.")
     
@@ -42,25 +48,63 @@ async def upload_file(file: UploadFile = File(...)):
         with open(temp_filename, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
             
-        # Process CSV
-        # We use strict table name "uploaded_data" for simplicity in this demo,
-        # or we could make it dynamic based on filename.
-        result = db.process_csv(temp_filename, table_name="uploaded_data")
+        # Basic analysis (Pandas)
+        db_result = db.analyze_csv(temp_filename, file.filename)
         
-        # Cleanup
-        os.remove(temp_filename)
-        
-        return {"message": "File processed successfully", "schema": result, "table_name": "uploaded_data"}
+        # AI Enrichment
+        try:
+            ai_metadata = agent.generate_table_metadata(db_result, file.filename)
+            
+            # Merge AI Suggestions
+            db_result["suggested_table_name"] = ai_metadata.get("table_name", db_result["suggested_table_name"])
+            db_result["description"] = ai_metadata.get("description", db_result["description"])
+            
+            # Merge Column Descriptions
+            ai_cols = {c["name"]: c.get("description", "") for c in ai_metadata.get("columns", [])}
+            for col in db_result["columns"]:
+                if col["name"] in ai_cols:
+                    col["description"] = ai_cols[col["name"]]
+                    
+            # Ensure uniqueness just in case LLM gave a generic name
+            # We already have a robust generator in db.py, but let's append random suffix if LLM didn't
+            if not any(char.isdigit() for char in db_result["suggested_table_name"][-6:]):
+                 suffix = db.generate_table_name("x").split("_")[-1] # Hacky way to get random suffix
+                 db_result["suggested_table_name"] += f"_{suffix}"
+                 
+        except Exception as e:
+            print(f"AI enrichment failed, proceeding with basic analysis: {e}")
+            
+        return db_result
     except Exception as e:
         if os.path.exists(temp_filename):
             os.remove(temp_filename)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/register")
+async def register_table(request: RegisterRequest):
+    try:
+        success = db.register_table(request.file_path, request.metadata)
+        
+        # Cleanup temp file
+        if os.path.exists(request.file_path):
+            os.remove(request.file_path)
+            
+        return {"status": "success", "table_name": request.metadata['table_name']}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/tables")
+async def get_tables():
+    try:
+        return db.get_all_tables()
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/chat")
 async def chat(request: ChatRequest):
     try:
         return StreamingResponse(
-            agent.stream_question(request.message, request.thread_id),
+            agent.stream_question(request.message, request.selected_tables, request.thread_id),
             media_type="application/x-ndjson"
         )
     except Exception as e:

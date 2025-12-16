@@ -1,61 +1,192 @@
+import sqlite3
 import pandas as pd
-from sqlalchemy import create_engine, inspect, text
 import os
+import json
+import random
+import string
+from typing import List, Dict, Optional
 
-DB_PATH = "sqlite:///./test.db"
-engine = create_engine(DB_PATH)
+DB_PATH = "database.db"
+METADATA_TABLE = "app_metadata"
 
 def init_db():
-    # SQLite is file-based, so just ensuring the engine works is enough usually.
-    # We can create a dummy connection.
-    try:
-        with engine.connect() as conn:
-            pass
-    except Exception as e:
-        print(f"DB Init Error: {e}")
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # Create metadata table
+    cursor.execute(f"""
+        CREATE TABLE IF NOT EXISTS {METADATA_TABLE} (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            table_name TEXT UNIQUE NOT NULL,
+            original_filename TEXT NOT NULL,
+            description TEXT,
+            columns_metadata TEXT  -- JSON string
+        )
+    """)
+    conn.commit()
+    conn.close()
 
-def process_csv(file_path: str, table_name: str = "uploaded_data"):
+def generate_table_name(filename: str) -> str:
+    # Sanitize: Remove extension, non-alphanumeric, lowercase
+    base = os.path.splitext(filename)[0].lower()
+    clean_base = "".join(c for c in base if c.isalnum() or c == '_')
+    if not clean_base:
+        clean_base = "table"
+    
+    # Add random suffix
+    suffix = "".join(random.choices(string.ascii_lowercase + string.digits, k=6))
+    return f"{clean_base}_{suffix}"
+
+def analyze_csv(file_path: str, original_filename: str) -> Dict:
     """
-    Reads a CSV file and creates a table in SQLite.
-    Dynamically infers types via pandas.
+    Reads CSV, infers schema, returns preview and suggested metadata.
+    Does NOT create the table yet.
     """
     try:
-        df = pd.read_csv(file_path)
-        # Sanitize column names (remove spaces, special chars if needed) - keeping simple for now
-        df.columns = [c.strip().replace(" ", "_").lower() for c in df.columns]
+        # Read a subset to infer types and preview
+        df_preview = pd.read_csv(file_path, nrows=5)
+        # Read 0 rows to get columns cheaply
+        df_headers = pd.read_csv(file_path, nrows=0)
         
-        # Write to SQL (replace if exists for this demo)
-        df.to_sql(table_name, engine, if_exists='replace', index=False)
-        return {"columns": list(df.columns), "row_count": len(df)}
+        columns = []
+        for col in df_headers.columns:
+            # Simple heuristic for type
+            dtype = "TEXT" # Default
+            if col in df_preview.columns:
+                 pd_type = str(df_preview[col].dtype)
+                 if 'int' in pd_type: dtype = "INTEGER"
+                 elif 'float' in pd_type: dtype = "REAL"
+            
+            columns.append({
+                "name": col,
+                "type": dtype,
+                "description": f"Column '{col}'" 
+            })
+
+        preview = df_preview.fillna("").to_dict(orient="records")
+        
+        # Quick row count
+        row_count = 0
+        with open(file_path, 'r', encoding='utf-8') as f:
+            row_count = sum(1 for _ in f) - 1
+            
+        suggested_name = generate_table_name(original_filename)
+        
+        return {
+            "file_path": file_path, # Temp used for next step
+            "original_filename": original_filename,
+            "suggested_table_name": suggested_name,
+            "description": f"Dataset imported from {original_filename}",
+            "columns": columns,
+            "preview": preview,
+            "row_count": row_count
+        }
     except Exception as e:
-        raise Exception(f"Error processing CSV: {e}")
+        raise Exception(f"Failed to analyze CSV: {str(e)}")
 
-def get_db_schema():
+def register_table(file_path: str, metadata: Dict):
     """
-    Returns the schema of the database for the LLM.
+    Creates the table in SQLite and saves metadata.
+    metadata structure: { table_name, description, columns: [{name, description, type}] }
     """
-    inspector = inspect(engine)
-    schema_info = ""
-    for table_name in inspector.get_table_names():
-        columns = inspector.get_columns(table_name)
-        schema_info += f"Table: {table_name}\nColumns:\n"
-        for col in columns:
-            schema_info += f"  - {col['name']} ({col['type']})\n"
-    return schema_info
+    table_name = metadata['table_name']
+    
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        df = pd.read_csv(file_path)
+        
+        # Sanitize columns in DF to match metadata names if we allow renaming later
+        # For now, just ensuring valid SQL identifiers 
+        df.columns = [c.strip().replace(" ", "_") for c in df.columns]
+        
+        # Write data
+        df.to_sql(table_name, conn, if_exists='fail', index=False)
+        
+        # Save Metadata
+        cursor = conn.cursor()
+        columns_json = json.dumps(metadata.get('columns', []))
+        cursor.execute(f"""
+            INSERT INTO {METADATA_TABLE} (table_name, original_filename, description, columns_metadata)
+            VALUES (?, ?, ?, ?)
+        """, (table_name, metadata.get('original_filename', 'unknown'), metadata.get('description', ''), columns_json))
+        
+        conn.commit()
+        conn.close()
+        return True
+    except sqlite3.IntegrityError:
+        raise Exception(f"Table '{table_name}' already exists.")
+    except Exception as e:
+        raise Exception(f"Failed to register table: {str(e)}")
 
-def execute_sql(query: str):
+def get_all_tables() -> List[Dict]:
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    # Check if metadata table exists (migration check)
+    try:
+        cursor.execute(f"SELECT * FROM {METADATA_TABLE}")
+        rows = cursor.fetchall()
+    except sqlite3.OperationalError:
+        # If table doesn't exist, maybe it's old DB. Init and try again.
+        init_db()
+        return []
+    
+    tables = []
+    for row in rows:
+        tables.append({
+            "id": row["id"],
+            "table_name": row["table_name"],
+            "original_filename": row["original_filename"],
+            "description": row["description"],
+            "columns": json.loads(row["columns_metadata"]) if row["columns_metadata"] else []
+        })
+    conn.close()
+    return tables
+
+def get_table_context(table_names: List[str]) -> str:
+    """
+    Returns a formatted string describing the selected tables and their metadata for the LLM.
+    """
+    if not table_names:
+        return ""
+        
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    
+    placeholders = ','.join('?' for _ in table_names)
+    try:
+        cursor.execute(f"SELECT * FROM {METADATA_TABLE} WHERE table_name IN ({placeholders})", table_names)
+        rows = cursor.fetchall()
+    except:
+        return ""
+    conn.close()
+    
+    context = ""
+    for row in rows:
+        context += f"Table: {row['table_name']}\n"
+        context += f"Description: {row['description']}\n"
+        context += "Columns:\n"
+        cols = json.loads(row["columns_metadata"]) if row["columns_metadata"] else []
+        for col in cols:
+            context += f"  - {col['name']} ({col['type']}): {col.get('description', '')}\n"
+        context += "\n"
+        
+    return context
+
+def execute_query(query: str):
     """
     Executes a read-only SQL query.
     """
-    # Basic safety check to prevent modification
     if not query.strip().lower().startswith("select"):
         return "Error: Only SELECT queries are allowed."
-
+        
+    conn = sqlite3.connect(DB_PATH)
     try:
-        with engine.connect() as conn:
-            result = conn.execute(text(query))
-            keys = result.keys()
-            rows = result.fetchall()
-            return [dict(zip(keys, row)) for row in rows]
+        df = pd.read_sql_query(query, conn)
+        conn.close()
+        return df.to_markdown(index=False)
     except Exception as e:
-        return f"Error executing SQL: {e}"
+        conn.close()
+        return f"Error executing query: {str(e)}"
