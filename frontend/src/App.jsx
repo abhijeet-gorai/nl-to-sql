@@ -4,7 +4,7 @@ import remarkGfm from 'remark-gfm';
 import {
   Database, Send, Upload, Sun, Moon,
   Check, ChevronRight, ChevronDown,
-  Terminal, Play, Cpu, Sparkles, User, Trash2, Pencil
+  Terminal, Play, Cpu, Sparkles, User, Trash2, Pencil, RotateCcw
 } from 'lucide-react';
 import './index.css';
 
@@ -31,6 +31,7 @@ function App() {
 
   // Modal State
   const [deleteConfirm, setDeleteConfirm] = useState({ isOpen: false, tableName: '' });
+  const [isClearingChat, setIsClearingChat] = useState(false);
 
   // --- Effects ---
   useEffect(() => {
@@ -301,6 +302,12 @@ function App() {
     }
   };
 
+  const confirmClearChat = () => {
+    setMessages([]);
+    setThreadId(Math.random().toString(36).substring(7));
+    setIsClearingChat(false);
+  };
+
   // --- Sub-components ---
 
   const AnalyzingOverlay = () => (
@@ -401,6 +408,16 @@ function App() {
         isDanger={true}
         onConfirm={proceedWithDelete}
         onCancel={() => setDeleteConfirm({ isOpen: false, tableName: '' })}
+      />
+
+      <ConfirmationModal
+        isOpen={isClearingChat}
+        title="Clear Chat History"
+        message="Are you sure you want to clear the current conversation? This will start a new session."
+        confirmText="Clear Chat"
+        isDanger={true}
+        onConfirm={confirmClearChat}
+        onCancel={() => setIsClearingChat(false)}
       />
 
       {/* Sidebar */}
@@ -564,8 +581,19 @@ function App() {
                 <Sparkles size={18} color="var(--accent-primary)" />
                 <span>Data Assistant</span>
               </div>
-              <div className="chat-badge">
-                {selectedTableIds.length} Contexts Active
+              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                <div className="chat-badge">
+                  {selectedTableIds.length} Contexts Active
+                </div>
+                <button
+                  className="icon-btn"
+                  onClick={() => setIsClearingChat(true)}
+                  title="Clear Chat"
+                  disabled={messages.length === 0}
+                  style={{ opacity: messages.length === 0 ? 0.5 : 1 }}
+                >
+                  <RotateCcw size={18} />
+                </button>
               </div>
             </div>
 
