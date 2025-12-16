@@ -65,14 +65,18 @@ async def analyze_file(file: UploadFile = File(...)):
                 if col["name"] in ai_cols:
                     col["description"] = ai_cols[col["name"]]
                     
-            # Ensure uniqueness just in case LLM gave a generic name
-            # We already have a robust generator in db.py, but let's append random suffix if LLM didn't
-            if not any(char.isdigit() for char in db_result["suggested_table_name"][-6:]):
-                 suffix = db.generate_table_name("x").split("_")[-1] # Hacky way to get random suffix
-                 db_result["suggested_table_name"] += f"_{suffix}"
+            # Ensure uniqueness
+            proposed_name = db_result["suggested_table_name"]
+            if db.check_table_exists(proposed_name):
+                 # If exists, append random suffix
+                 suffix = db.generate_random_suffix()
+                 db_result["suggested_table_name"] = f"{proposed_name}_{suffix}"
                  
         except Exception as e:
             print(f"AI enrichment failed, proceeding with basic analysis: {e}")
+            # Even for basic analysis, ensure uniqueness if we use the default fallback
+            # (Note: db.analyze_csv already called generate_table_name which adds a suffix by default,
+            # so we are mostly covered, but good to be safe if logic changes)
             
         return db_result
     except Exception as e:

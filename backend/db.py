@@ -26,6 +26,18 @@ def init_db():
     conn.commit()
     conn.close()
 
+def check_table_exists(table_name: str) -> bool:
+    """Checks if a table name already exists in the metadata."""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(f"SELECT 1 FROM {METADATA_TABLE} WHERE table_name = ?", (table_name,))
+    exists = cursor.fetchone() is not None
+    conn.close()
+    return exists
+
+def generate_random_suffix(length: int = 6) -> str:
+    return "".join(random.choices(string.ascii_lowercase + string.digits, k=length))
+
 def generate_table_name(filename: str) -> str:
     # Sanitize: Remove extension, non-alphanumeric, lowercase
     base = os.path.splitext(filename)[0].lower()
@@ -33,9 +45,8 @@ def generate_table_name(filename: str) -> str:
     if not clean_base:
         clean_base = "table"
     
-    # Add random suffix
-    suffix = "".join(random.choices(string.ascii_lowercase + string.digits, k=6))
-    return f"{clean_base}_{suffix}"
+    # Default behavior: Add random suffix to ensure uniqueness for fallback
+    return f"{clean_base}_{generate_random_suffix()}"
 
 def analyze_csv(file_path: str, original_filename: str) -> Dict:
     """
