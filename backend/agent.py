@@ -19,12 +19,130 @@ llm = ChatWatsonx(
     }
 )
 
+import matplotlib
+matplotlib.use('Agg') # Non-interactive backend
+import matplotlib.pyplot as plt
+import pandas as pd
+import uuid
+
 @tool
 def execute_query(query: str) -> str:
     """Executes a SQL SELECT query against the database and returns the results."""
     return str(db.execute_query(query))
 
-tools = [execute_query]
+@tool
+def generate_chart(query: str, chart_type: str, x_col: str, y_col: str, title: str = "") -> str:
+    """
+    Generates a STANDARD chart (bar, line, pie, scatter) from a SQL query.
+    Use this for simple, single-series visualizations.
+    args:
+        query: The SQL query to fetch data.
+        chart_type: 'bar', 'line', 'pie', or 'scatter'.
+        x_col: Column name for X axis.
+        y_col: Column name for Y axis.
+        title: Chart title.
+    """
+    # ... existing implementation ...
+    df = db.get_raw_dataframe(query)
+    if df is None or df.empty:
+        return "Error: Query returned no data."
+    
+    if x_col not in df.columns or y_col not in df.columns:
+        return f"Error: Columns {x_col} or {y_col} not found in results: {list(df.columns)}"
+
+    plt.figure(figsize=(10, 6))
+    
+    try:
+        if chart_type == 'bar':
+            plt.bar(df[x_col], df[y_col])
+        elif chart_type == 'line':
+            plt.plot(df[x_col], df[y_col], marker='o')
+        elif chart_type == 'scatter':
+            plt.scatter(df[x_col], df[y_col])
+        elif chart_type == 'pie':
+            plt.pie(df[y_col], labels=df[x_col], autopct='%1.1f%%')
+        else:
+            return f"Error: Unsupported chart type '{chart_type}'."
+            
+        if title:
+            plt.title(title)
+        
+        if chart_type != 'pie':
+            plt.xlabel(x_col)
+            plt.ylabel(y_col)
+            plt.xticks(rotation=45)
+            
+        plt.tight_layout()
+        
+        # Save file
+        filename = f"chart_{uuid.uuid4()}.png"
+        charts_dir = os.path.join(os.path.dirname(__file__), "charts")
+        os.makedirs(charts_dir, exist_ok=True)
+        filepath = os.path.join(charts_dir, filename)
+        
+        plt.savefig(filepath)
+        plt.close()
+        
+        # Return Markdown Image
+        return f"![{title}](http://localhost:8000/charts/{filename})"
+        
+    except Exception as e:
+        plt.close()
+        return f"Error generating chart: {e}"
+
+@tool
+def generate_custom_chart(python_code: str) -> str:
+    """
+    Generates a CUSTOM or COMPLEX chart by executing Python code.
+    Use this when 'generate_chart' is insufficient (e.g., dual-axis, subplots, heatmaps, or advanced formatting).
+    
+    The code has access to:
+    - 'pd' (pandas)
+    - 'plt' (matplotlib.pyplot)
+    - 'db' (database module)
+    - 'sqlite3'
+    - 'DB_PATH' (string path to database)
+
+    Instructions for code:
+    1. Connect to DB using sqlite3 or use db.get_raw_dataframe(query).
+    2. Create a figure using plt.figure().
+    3. Plot data.
+    4. Data MUST be fetched inside the code.
+    5. DO NOT show() or save() the plot. The system handles saving.
+    """
+    try:
+        # Define secure-ish locals
+        local_scope = {
+            "pd": pd,
+            "plt": plt,
+            "db": db,
+            "sqlite3": db.sqlite3, # db imports sqlite3
+            "DB_PATH": db.DB_PATH
+        }
+        
+        # Execute the code
+        exec(python_code, globals(), local_scope)
+        
+        # Check if figure exists
+        if plt.get_fignums():
+             # Save file
+            filename = f"custom_chart_{uuid.uuid4()}.png"
+            charts_dir = os.path.join(os.path.dirname(__file__), "charts")
+            os.makedirs(charts_dir, exist_ok=True)
+            filepath = os.path.join(charts_dir, filename)
+            
+            plt.savefig(filepath)
+            plt.close('all') # Close all figures to clean up
+            
+            return f"![Custom Chart](http://localhost:8000/charts/{filename})"
+        else:
+             return "Error: No chart was created. Did you forget to call plt.plot()?"
+
+    except Exception as e:
+        plt.close('all')
+        return f"Error executing custom chart code: {e}"
+
+tools = [execute_query, generate_chart, generate_custom_chart]
 
 # Validate that we have the necessary credentials
 def validate_creds():

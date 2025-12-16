@@ -14,6 +14,8 @@ load_dotenv()
 
 app = FastAPI()
 
+from fastapi.staticfiles import StaticFiles
+
 # Enable CORS for frontend
 app.add_middleware(
     CORSMiddleware,
@@ -22,6 +24,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Create charts directory if not exists
+CHARTS_DIR = os.path.join(os.path.dirname(__file__), "charts")
+os.makedirs(CHARTS_DIR, exist_ok=True)
+
+# Mount static files for charts
+app.mount("/charts", StaticFiles(directory=CHARTS_DIR), name="charts")
 
 # Initialize DB on startup
 @app.on_event("startup")

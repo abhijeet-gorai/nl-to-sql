@@ -1061,3 +1061,7 @@ body {
 .btn-danger:hover {
   background: #dc2626;
 }
+
+img {
+  width: 100%;
+}

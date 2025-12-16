@@ -250,3 +250,20 @@ def execute_query(query: str):
     except Exception as e:
         conn.close()
         return f"Error executing query: {str(e)}"
+
+def get_raw_dataframe(query: str) -> Optional[pd.DataFrame]:
+    """
+    Executes a read-only SQL query and returns the pandas DataFrame directly.
+    """
+    if not query.strip().lower().startswith("select"):
+        return None
+        
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        df = pd.read_sql_query(query, conn)
+        conn.close()
+        return df
+    except Exception as e:
+        conn.close()
+        print(f"Error executing query: {e}")
+        return None
