@@ -537,7 +537,14 @@ function App() {
               </div>
 
               <div className="editor-footer">
-                <button className="btn btn-ghost" onClick={() => { setStagingMetadata(null); setView('empty'); }}>
+                <button
+                  className="btn btn-ghost"
+                  onClick={() => {
+                    setStagingMetadata(null);
+                    // If we have existing tables, go back to chat. Only go to empty if no tables exist.
+                    setView(tables.length > 0 ? 'chat' : 'empty');
+                  }}
+                >
                   Cancel
                 </button>
                 <button className="btn btn-primary" onClick={handleSaveMetadata}>
