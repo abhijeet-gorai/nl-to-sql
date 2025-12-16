@@ -46,7 +46,7 @@ from langchain_core.messages import AIMessage, ToolMessage
 import json
 import re
 
-def generate_table_metadata(preview_data: dict, filename: str) -> dict:
+def generate_table_metadata(preview_data: dict, filename: str, existing_tables: list[str] = None) -> dict:
     """
     Generates metadata (table name, description, column descriptions) using LLM.
     """
@@ -54,10 +54,16 @@ def generate_table_metadata(preview_data: dict, filename: str) -> dict:
     preview_str = json.dumps(preview_data['preview'], indent=2)
     min_preview = preview_str[:2000] # Truncate if too long
     
+    existing_tables_str = ", ".join(existing_tables) if existing_tables else "None"
+
     prompt = f"""
     Analyze the following dataset preview from file '{filename}':
     {min_preview}
     
+    The following table names ALREADY EXIST in the database: [{existing_tables_str}].
+    You MUST choose a unique table_name that is NOT in the list above. 
+    If the suggested name conflicts, append a suffix or change the name entirely to be unique but descriptive.
+
     Generate metadata in STRICT JSON format with the following structure:
     {{
         "table_name": "suggested_snake_case_name",
@@ -110,8 +116,7 @@ async def stream_question(user_question: str, selected_tables: list[str], thread
     User Question: {user_question}
     
     Instructions:
-    1. ARTIFACTS: When answering, if the result is a table, simple return the markdown.
-    2. PRIVACY: Do not query tables that are not listed above.
+    1. PRIVACY: Do not query tables that are not listed above.
     """
     
     # Use astream_events to get granular updates including tokens

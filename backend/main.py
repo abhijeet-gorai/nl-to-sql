@@ -53,7 +53,11 @@ async def analyze_file(file: UploadFile = File(...)):
         
         # AI Enrichment
         try:
-            ai_metadata = agent.generate_table_metadata(db_result, file.filename)
+            # Get existing table names to avoid collisions
+            tables = db.get_all_tables()
+            existing_names = [t["table_name"] for t in tables]
+            
+            ai_metadata = agent.generate_table_metadata(db_result, file.filename, existing_names)
             
             # Merge AI Suggestions
             db_result["suggested_table_name"] = ai_metadata.get("table_name", db_result["suggested_table_name"])
