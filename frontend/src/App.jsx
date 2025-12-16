@@ -4,7 +4,7 @@ import remarkGfm from 'remark-gfm';
 import {
   Database, Send, Upload, Sun, Moon,
   Check, ChevronRight, ChevronDown,
-  Terminal, Play, Cpu, Sparkles, User, Trash2
+  Terminal, Play, Cpu, Sparkles, User, Trash2, Pencil
 } from 'lucide-react';
 import './index.css';
 
@@ -103,32 +103,61 @@ function App() {
     }
   };
 
-  const handleRegister = async () => {
+  const handleEditTable = (e, table) => {
+    e.stopPropagation();
+    setStagingMetadata({
+      ...table,
+      isEditing: true
+    });
+    setView('edit-metadata');
+  };
+
+  const handleSaveMetadata = async () => {
     if (!stagingMetadata) return;
 
     try {
-      const res = await fetch(`${API_BASE_URL}/register`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          file_path: stagingMetadata.file_path,
-          metadata: {
-            table_name: stagingMetadata.table_name,
-            original_filename: stagingMetadata.original_filename,
-            description: stagingMetadata.description,
-            columns: stagingMetadata.columns
-          }
-        })
-      });
+      if (stagingMetadata.isEditing) {
+        // Update existing table
+        const res = await fetch(`${API_BASE_URL}/tables/${stagingMetadata.table_name}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            metadata: {
+              description: stagingMetadata.description,
+              columns: stagingMetadata.columns
+            }
+          })
+        });
 
-      if (!res.ok) throw new Error("Registration failed");
+        if (!res.ok) throw new Error("Update failed");
 
-      const result = await res.json();
-      await fetchTables();
+        await fetchTables();
+        setView('chat'); // Go back to chat or maybe stay? Chat is fine.
+        setStagingMetadata(null);
 
-      setSelectedTableIds(prev => [...prev, result.table_name]);
-      setView('chat');
-      setStagingMetadata(null);
+      } else {
+        // Register new table
+        const res = await fetch(`${API_BASE_URL}/register`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            file_path: stagingMetadata.file_path,
+            metadata: {
+              table_name: stagingMetadata.table_name,
+              original_filename: stagingMetadata.original_filename,
+              description: stagingMetadata.description,
+              columns: stagingMetadata.columns
+            }
+          })
+        });
+
+        if (!res.ok) throw new Error("Registration failed");
+        const result = await res.json();
+        await fetchTables();
+        setSelectedTableIds(prev => [...prev, result.table_name]);
+        setView('chat');
+        setStagingMetadata(null);
+      }
 
     } catch (err) {
       alert(err.message);
@@ -407,13 +436,22 @@ function App() {
                 <div className="nav-item-title">{table.table_name}</div>
                 <div className="nav-item-sub">{table.description || "No description"}</div>
               </div>
-              <button
-                className="icon-btn delete-btn"
-                onClick={(e) => handleDeleteTable(e, table.table_name)}
-                title="Delete Table"
-              >
-                <Trash2 size={14} />
-              </button>
+              <div className="nav-item-actions" style={{ marginLeft: 'auto', display: 'flex', gap: '0.25rem' }}>
+                <button
+                  className="icon-btn edit-btn"
+                  onClick={(e) => handleEditTable(e, table)}
+                  title="Edit Metadata"
+                >
+                  <Pencil size={14} />
+                </button>
+                <button
+                  className="icon-btn delete-btn"
+                  onClick={(e) => handleDeleteTable(e, table.table_name)}
+                  title="Delete Table"
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
             </div>
           ))}
         </div>
@@ -450,6 +488,8 @@ function App() {
                       className="input-text"
                       value={stagingMetadata.table_name}
                       onChange={(e) => setStagingMetadata({ ...stagingMetadata, table_name: e.target.value })}
+                      disabled={stagingMetadata.isEditing}
+                      style={stagingMetadata.isEditing ? { opacity: 0.6, cursor: 'not-allowed' } : {}}
                     />
                   </div>
                   <div className="field-group">
@@ -500,9 +540,9 @@ function App() {
                 <button className="btn btn-ghost" onClick={() => { setStagingMetadata(null); setView('empty'); }}>
                   Cancel
                 </button>
-                <button className="btn btn-primary" onClick={handleRegister}>
+                <button className="btn btn-primary" onClick={handleSaveMetadata}>
                   <Check size={18} />
-                  Complete Registration
+                  {stagingMetadata.isEditing ? 'Save Changes' : 'Complete Registration'}
                 </button>
               </div>
             </div>

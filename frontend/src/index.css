@@ -199,21 +199,32 @@ body {
   border-color: rgba(99, 102, 241, 0.1);
 }
 
-.nav-item .delete-btn {
+.nav-item .nav-item-actions {
   opacity: 0;
   margin-left: auto;
-  padding: 4px;
-  color: var(--text-tertiary);
+  transition: opacity 0.2s;
+  display: flex;
+  gap: 4px;
 }
 
-.nav-item:hover .delete-btn {
+.nav-item:hover .nav-item-actions {
   opacity: 1;
+}
+
+.nav-item .icon-btn {
+  padding: 4px;
+  color: var(--text-tertiary);
 }
 
 .nav-item .delete-btn:hover {
   color: #ef4444;
   /* Red */
   background: rgba(239, 68, 68, 0.1);
+}
+
+.nav-item .edit-btn:hover {
+  color: var(--accent-primary);
+  background: var(--accent-surface);
 }
 
 .nav-item-icon {

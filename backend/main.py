@@ -101,6 +101,19 @@ async def register_table(request: RegisterRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+class UpdateMetadataRequest(BaseModel):
+    metadata: Dict[str, Any]
+
+@app.put("/tables/{table_name}")
+async def update_table(table_name: str, request: UpdateMetadataRequest):
+    try:
+        success = db.update_table_metadata(table_name, request.metadata)
+        if not success:
+            raise HTTPException(status_code=404, detail="Table not found")
+        return {"status": "success", "table_name": table_name}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/tables")
 async def get_tables():
     return db.get_all_tables()

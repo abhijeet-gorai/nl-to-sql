@@ -129,6 +129,33 @@ def register_table(file_path: str, metadata: Dict):
     except Exception as e:
         raise Exception(f"Failed to register table: {str(e)}")
 
+def update_table_metadata(table_name: str, metadata: Dict) -> bool:
+    """
+    Updates description and columns_metadata for an existing table.
+    """
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    try:
+        columns_json = json.dumps(metadata.get('columns', []))
+        
+        cursor.execute(f"""
+            UPDATE {METADATA_TABLE}
+            SET description = ?, columns_metadata = ?
+            WHERE table_name = ?
+        """, (metadata.get('description', ''), columns_json, table_name))
+        
+        if cursor.rowcount == 0:
+            return False
+            
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"Failed to update metadata for {table_name}: {e}")
+        raise e
+    finally:
+        conn.close()
+
 def delete_table(table_name: str) -> bool:
     """
     Drops the table and removes its metadata.
