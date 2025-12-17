@@ -7,7 +7,7 @@ import sqlite3
 import json
 from typing import List, Dict
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, date
 import connection_manager as cm
 import agent
 
@@ -51,10 +51,19 @@ def extract_table_metadata(connection_id: int, schema: str, table: str) -> Dict:
 def enrich_metadata_with_ai(table_metadata: Dict, sample_data: pd.DataFrame) -> Dict:
     """Use AI to generate descriptions for table and columns"""
     try:
-        # Prepare preview data similar to CSV analysis
+        preview_df = sample_data.head(5).copy()
+
+        def make_json_safe(val):
+            if isinstance(val, (pd.Timestamp, date, datetime)):
+                return val.isoformat()
+            return val
+
+        # Apply element-wise conversion
+        preview_df = preview_df.applymap(make_json_safe).fillna("")
+
         preview_data = {
-            'preview': sample_data.head(5).fillna("").to_dict(orient="records"),
-            'columns': table_metadata['columns']
+            "preview": preview_df.to_dict(orient="records"),
+            "columns": table_metadata["columns"]
         }
         
         # Use existing AI metadata generation
@@ -181,12 +190,27 @@ def get_external_tables(connection_id: int = None) -> List[Dict]:
 
 
 def delete_external_table(table_id: int) -> bool:
-    """Delete an external table from local metadata"""
+    """Delete an external table from local metadata by ID"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
     try:
         cursor.execute(f"DELETE FROM {EXTERNAL_TABLES_TABLE} WHERE id = ?", (table_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+def delete_external_table_by_name(table_name: str) -> bool:
+    """Delete an external table from local metadata by display name or table name"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    try:
+        # Try to delete by display_name first (what user sees), then by table_name
+        cursor.execute(f"DELETE FROM {EXTERNAL_TABLES_TABLE} WHERE display_name = ? OR table_name = ?",
+                      (table_name, table_name))
         conn.commit()
         return cursor.rowcount > 0
     finally:
@@ -208,6 +232,32 @@ def update_external_table_selection(table_id: int, is_selected: bool) -> bool:
         return cursor.rowcount > 0
     finally:
         conn.close()
+
+def update_external_table_metadata(table_name: str, metadata: Dict) -> bool:
+    """Update metadata for an external table"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    try:
+        columns_json = json.dumps(metadata.get('columns', []))
+        
+        cursor.execute(f"""
+            UPDATE {EXTERNAL_TABLES_TABLE}
+            SET description = ?, columns_metadata = ?
+            WHERE table_name = ?
+        """, (metadata.get('description', ''), columns_json, table_name))
+        
+        if cursor.rowcount == 0:
+            return False
+            
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"Failed to update external table metadata for {table_name}: {e}")
+        raise e
+    finally:
+        conn.close()
+
 
 
 def get_selected_external_tables() -> List[Dict]:

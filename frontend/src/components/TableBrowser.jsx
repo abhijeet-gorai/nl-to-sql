@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { X, Search, Loader, Database, Eye, CheckSquare, Square } from 'lucide-react';
+import { X, Search, Loader, Database, Eye, CheckSquare, Square, Check } from 'lucide-react';
 import CustomSelect from './CustomSelect';
 
 const API_BASE_URL = 'http://localhost:8000';
@@ -10,6 +10,7 @@ const TableBrowser = ({ onClose, onTablesSynced }) => {
   const [schemas, setSchemas] = useState([]);
   const [selectedSchema, setSelectedSchema] = useState('');
   const [tables, setTables] = useState([]);
+  const [syncedTables, setSyncedTables] = useState(new Set());
   const [selectedTables, setSelectedTables] = useState(new Set());
   const [searchTerm, setSearchTerm] = useState('');
   const [loading, setLoading] = useState(false);
@@ -39,6 +40,19 @@ const TableBrowser = ({ onClose, onTablesSynced }) => {
     }
   };
 
+  const fetchSyncedTables = async (connectionId) => {
+    try {
+      const res = await fetch(`${API_BASE_URL}/external-tables?connection_id=${connectionId}`);
+      if (res.ok) {
+        const data = await res.json();
+        const syncedNames = new Set(data.map(t => t.table_name));
+        setSyncedTables(syncedNames);
+      }
+    } catch (e) {
+      console.error('Failed to fetch synced tables', e);
+    }
+  };
+
   const handleConnectionSelect = async (connectionId) => {
     const connection = connections.find(c => c.id === connectionId);
     if (!connection) return;
@@ -47,13 +61,18 @@ const TableBrowser = ({ onClose, onTablesSynced }) => {
     setSelectedSchema('');
     setTables([]);
     setSelectedTables(new Set());
+    setSyncedTables(new Set());
     setLoading(true);
     setLoadingMessage('Loading schemas...');
 
     try {
-      const res = await fetch(`${API_BASE_URL}/connections/${connection.id}/schemas`);
-      if (res.ok) {
-        const data = await res.json();
+      const [schemasRes] = await Promise.all([
+        fetch(`${API_BASE_URL}/connections/${connection.id}/schemas`),
+        fetchSyncedTables(connection.id)
+      ]);
+      
+      if (schemasRes.ok) {
+        const data = await schemasRes.json();
         setSchemas(data.schemas || []);
       }
     } catch (e) {
@@ -145,9 +164,10 @@ const TableBrowser = ({ onClose, onTablesSynced }) => {
       });
 
       if (res.ok) {
-        await res.json();
+        const result = await res.json();
+        // Close browser and pass synced tables to parent for metadata editing
         if (onTablesSynced) {
-          onTablesSynced();
+          onTablesSynced(result.tables);
         }
         onClose();
       } else {
@@ -284,8 +304,8 @@ const TableBrowser = ({ onClose, onTablesSynced }) => {
             </div>
           ) : (
             filteredTables.map(table => (
-              <div 
-                key={table.table_name} 
+              <div
+                key={table.table_name}
                 className={`table-item ${selectedTables.has(table.table_name) ? 'selected' : ''}`}
               >
                 <label className="table-checkbox">
@@ -301,7 +321,26 @@ const TableBrowser = ({ onClose, onTablesSynced }) => {
                   )}
                 </label>
                 <div className="table-info">
-                  <div className="table-name">{table.table_name}</div>
+                  <div className="table-name">
+                    {table.table_name}
+                    {syncedTables.has(table.table_name) && (
+                      <span style={{
+                        marginLeft: '0.5rem',
+                        padding: '0.125rem 0.5rem',
+                        background: 'rgba(34, 197, 94, 0.1)',
+                        color: '#22c55e',
+                        borderRadius: '4px',
+                        fontSize: '0.75rem',
+                        fontWeight: 600,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '0.25rem'
+                      }}>
+                        <Check size={12} />
+                        Synced
+                      </span>
+                    )}
+                  </div>
                   <div className="table-meta">
                     {table.column_count} columns
                   </div>
@@ -392,6 +431,7 @@ const TableBrowser = ({ onClose, onTablesSynced }) => {
             </div>
           </div>
         )}
+
       </div>
     </div>
   );

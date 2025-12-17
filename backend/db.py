@@ -159,22 +159,38 @@ def update_table_metadata(table_name: str, metadata: Dict) -> bool:
 def delete_table(table_name: str) -> bool:
     """
     Drops the table and removes its metadata.
+    Returns False if the table does not exist.
     """
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    
+
     try:
+        # Check if table exists
+        cursor.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
+            (table_name,)
+        )
+        table_exists = cursor.fetchone() is not None
+
+        if not table_exists:
+            return False
+
         # Drop table
         cursor.execute(f"DROP TABLE IF EXISTS {table_name}")
-        
+
         # Remove metadata
-        cursor.execute(f"DELETE FROM {METADATA_TABLE} WHERE table_name = ?", (table_name,))
-        
+        cursor.execute(
+            f"DELETE FROM {METADATA_TABLE} WHERE table_name = ?",
+            (table_name,)
+        )
+
         conn.commit()
         return True
+
     except Exception as e:
         print(f"Failed to delete table {table_name}: {e}")
         return False
+
     finally:
         conn.close()
 

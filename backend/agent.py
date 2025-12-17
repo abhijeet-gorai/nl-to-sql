@@ -2,6 +2,7 @@ from langchain_ibm import ChatWatsonx
 from langchain.tools import tool, ToolRuntime
 from langchain.agents import AgentState, create_agent
 from langgraph.checkpoint.memory import MemorySaver
+from langchain_core.output_parsers import JsonOutputParser
 import os
 import db
 import query_router
@@ -227,13 +228,8 @@ def generate_table_metadata(preview_data: dict, filename: str, existing_tables: 
         response = llm.invoke(prompt)
         content = response.content.strip()
         
-        # Cleanup markdown code blocks if present
-        if content.startswith("```"):
-            content = content.strip("`")
-            if content.startswith("json"):
-                content = content[4:]
-        
-        metadata = json.loads(content)
+        metadata = JsonOutputParser().parse(content)
+        print("Metadata generation succeeded", metadata)
         return metadata
     except Exception as e:
         print(f"Metadata generation failed: {e}")

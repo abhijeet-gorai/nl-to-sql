@@ -121,9 +121,13 @@ class UpdateMetadataRequest(BaseModel):
 @app.put("/tables/{table_name}")
 async def update_table(table_name: str, request: UpdateMetadataRequest):
     try:
+        # Try updating CSV table first
         success = db.update_table_metadata(table_name, request.metadata)
         if not success:
-            raise HTTPException(status_code=404, detail="Table not found")
+            # If not found in CSV tables, try external tables
+            success = me.update_external_table_metadata(table_name, request.metadata)
+            if not success:
+                raise HTTPException(status_code=404, detail="Table not found")
         return {"status": "success", "table_name": table_name}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -254,7 +258,17 @@ async def sync_tables(connection_id: int, request: TableSyncRequest):
         success = me.sync_external_tables(connection_id, request.tables)
         if not success:
             raise HTTPException(status_code=500, detail="Failed to sync tables")
-        return {"status": "success", "synced_count": len(request.tables)}
+        
+        # Get the synced tables with their metadata
+        synced_tables = me.get_external_tables(connection_id)
+        synced_table_names = [t['table_name'] for t in request.tables]
+        synced_tables = [t for t in synced_tables if t['table_name'] in synced_table_names]
+        
+        return {
+            "status": "success",
+            "synced_count": len(request.tables),
+            "tables": synced_tables
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -286,9 +300,13 @@ async def get_tables():
 
 @app.delete("/tables/{table_name}")
 async def delete_table(table_name: str):
+    # Try deleting from CSV tables first
     success = db.delete_table(table_name)
     if not success:
-         raise HTTPException(status_code=500, detail="Failed to delete table")
+        # If not found in CSV tables, try external tables
+        success = me.delete_external_table_by_name(table_name)
+        if not success:
+            raise HTTPException(status_code=404, detail="Table not found")
     return {"status": "success", "table_name": table_name}
 
 @app.post("/chat")

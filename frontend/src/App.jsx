@@ -9,6 +9,7 @@ import {
 import './index.css';
 import ConnectionManager from './components/ConnectionManager';
 import TableBrowser from './components/TableBrowser';
+import MetadataEditor from './components/MetadataEditor';
 
 const API_BASE_URL = 'http://localhost:8000';
 
@@ -37,6 +38,7 @@ function App() {
   const [isClearingChat, setIsClearingChat] = useState(false);
   const [showConnectionManager, setShowConnectionManager] = useState(false);
   const [showTableBrowser, setShowTableBrowser] = useState(false);
+  const [successModal, setSuccessModal] = useState({ isOpen: false, message: '' });
   const initialLoadRef = useRef(false);
 
   // --- Effects ---
@@ -98,11 +100,11 @@ function App() {
 
       const data = await res.json();
 
-      setStagingMetadata({
+      setStagingMetadata([{
         ...data,
         table_name: data.suggested_table_name,
         columns: data.columns
-      });
+      }]);
       setView('edit-metadata');
 
     } catch (err) {
@@ -116,60 +118,82 @@ function App() {
 
   const handleEditTable = (e, table) => {
     e.stopPropagation();
-    setStagingMetadata({
+    setStagingMetadata([{
       ...table,
       isEditing: true
-    });
+    }]);
     setView('edit-metadata');
   };
 
-  const handleSaveMetadata = async () => {
-    if (!stagingMetadata) return;
+  const handleTablesSynced = (syncedTables) => {
+    // Close the browser and show metadata editor
+    setShowTableBrowser(false);
+    setStagingMetadata(syncedTables);
+    setView('edit-metadata');
+  };
+
+  const handleSaveMetadata = async (tables) => {
+    const tablesToSave = Array.isArray(tables) ? tables : [tables];
+    if (tablesToSave.length === 0) return;
 
     try {
-      if (stagingMetadata.isEditing) {
-        // Update existing table
-        const res = await fetch(`${API_BASE_URL}/tables/${stagingMetadata.table_name}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            metadata: {
-              description: stagingMetadata.description,
-              columns: stagingMetadata.columns
-            }
-          })
-        });
+      const updatedTables = [];
+      const registeredTables = [];
 
-        if (!res.ok) throw new Error("Update failed");
+      for (const table of tablesToSave) {
+        if (table.isEditing) {
+          // Update existing table
+          const res = await fetch(`${API_BASE_URL}/tables/${table.table_name}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              metadata: {
+                description: table.description,
+                columns: table.columns
+              }
+            })
+          });
 
-        await fetchTables();
-        setView('chat'); // Go back to chat or maybe stay? Chat is fine.
-        setStagingMetadata(null);
+          if (!res.ok) {
+            const errorData = await res.json().catch(() => ({}));
+            throw new Error(errorData.detail || "Update failed");
+          }
+          updatedTables.push(table.table_name);
+        } else {
+          // Register new table
+          const res = await fetch(`${API_BASE_URL}/register`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              file_path: table.file_path,
+              metadata: {
+                table_name: table.table_name,
+                original_filename: table.original_filename,
+                description: table.description,
+                columns: table.columns
+              }
+            })
+          });
 
-      } else {
-        // Register new table
-        const res = await fetch(`${API_BASE_URL}/register`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            file_path: stagingMetadata.file_path,
-            metadata: {
-              table_name: stagingMetadata.table_name,
-              original_filename: stagingMetadata.original_filename,
-              description: stagingMetadata.description,
-              columns: stagingMetadata.columns
-            }
-          })
-        });
-
-        if (!res.ok) throw new Error("Registration failed");
-        const result = await res.json();
-        await fetchTables();
-        setSelectedTableIds(prev => [...prev, result.table_name]);
-        setView('chat');
-        setStagingMetadata(null);
+          if (!res.ok) throw new Error("Registration failed");
+          const result = await res.json();
+          setSelectedTableIds(prev => [...prev, result.table_name]);
+          registeredTables.push(table.table_name);
+        }
       }
+      
+      await fetchTables();
+      setView('chat');
+      setStagingMetadata(null);
 
+      // Show success modal
+      let message = '';
+      if (updatedTables.length > 0) {
+        message = `Metadata updated successfully for: ${updatedTables.join(', ')}`;
+      } else if (registeredTables.length > 0) {
+        message = `Tables registered successfully: ${registeredTables.join(', ')}`;
+      }
+      setSuccessModal({ isOpen: true, message });
     } catch (err) {
       alert(err.message);
     }
@@ -482,6 +506,16 @@ function App() {
         onCancel={() => setIsClearingChat(false)}
       />
 
+      <ConfirmationModal
+        isOpen={successModal.isOpen}
+        title="Success"
+        message={successModal.message}
+        confirmText="OK"
+        isDanger={false}
+        onConfirm={() => setSuccessModal({ isOpen: false, message: '' })}
+        onCancel={() => setSuccessModal({ isOpen: false, message: '' })}
+      />
+
       {/* Sidebar */}
       <aside className="sidebar">
         <div className="brand">
@@ -592,89 +626,15 @@ function App() {
 
         {/* VIEW: Metadata Editor */}
         {view === 'edit-metadata' && stagingMetadata && (
-          <div className="editor-wrapper">
-            <div className="editor-card">
-              <div className="editor-header">
-                <div>
-                  <h2 style={{ fontSize: '1.25rem', fontWeight: 700 }}>Metadata Configuration</h2>
-                  <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Review and enrich your dataset before analyzing.</p>
-                </div>
-              </div>
-
-              <div className="editor-body">
-                <div className="editor-row">
-                  <div className="field-group">
-                    <label className="field-label">Table Name</label>
-                    <input
-                      className="input-text"
-                      value={stagingMetadata.table_name}
-                      onChange={(e) => setStagingMetadata({ ...stagingMetadata, table_name: e.target.value })}
-                      disabled={stagingMetadata.isEditing}
-                      style={stagingMetadata.isEditing ? { opacity: 0.6, cursor: 'not-allowed' } : {}}
-                    />
-                  </div>
-                  <div className="field-group">
-                    <label className="field-label">Original Filename</label>
-                    <input className="input-text" value={stagingMetadata.original_filename} disabled style={{ opacity: 0.6 }} />
-                  </div>
-                </div>
-
-                <div className="field-group">
-                  <label className="field-label">Description</label>
-                  <textarea
-                    className="input-area"
-                    rows={2}
-                    value={stagingMetadata.description}
-                    onChange={(e) => setStagingMetadata({ ...stagingMetadata, description: e.target.value })}
-                    placeholder="What does this dataset contain?"
-                  />
-                </div>
-
-                <div className="columns-header">
-                  {stagingMetadata.columns.length} Columns Detected
-                </div>
-
-                <div className="column-list">
-                  {stagingMetadata.columns.map((col, idx) => (
-                    <div key={idx} className="column-row">
-                      <div className="col-meta">
-                        <div className="col-name">{col.name}</div>
-                        <div className="col-type">{col.type}</div>
-                      </div>
-                      <textarea
-                        className="col-desc-input"
-                        placeholder="Add a description for this column..."
-                        rows={2}
-                        value={col.description}
-                        onChange={(e) => {
-                          const newCols = [...stagingMetadata.columns];
-                          newCols[idx].description = e.target.value;
-                          setStagingMetadata({ ...stagingMetadata, columns: newCols });
-                        }}
-                      />
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="editor-footer">
-                <button
-                  className="btn btn-ghost"
-                  onClick={() => {
-                    setStagingMetadata(null);
-                    // If we have existing tables, go back to chat. Only go to empty if no tables exist.
-                    setView(tables.length > 0 ? 'chat' : 'empty');
-                  }}
-                >
-                  Cancel
-                </button>
-                <button className="btn btn-primary" onClick={handleSaveMetadata}>
-                  <Check size={18} />
-                  {stagingMetadata.isEditing ? 'Save Changes' : 'Complete Registration'}
-                </button>
-              </div>
-            </div>
-          </div>
+          <MetadataEditor
+            tables={stagingMetadata}
+            onSave={handleSaveMetadata}
+            onCancel={() => {
+              setStagingMetadata(null);
+              setView(tables.length > 0 ? 'chat' : 'empty');
+            }}
+            isMultiple={Array.isArray(stagingMetadata) && stagingMetadata.length > 1}
+          />
         )}
 
         {/* VIEW: Chat */}
@@ -790,9 +750,7 @@ function App() {
       {showTableBrowser && (
         <TableBrowser
           onClose={() => setShowTableBrowser(false)}
-          onTablesSynced={() => {
-            fetchTables();
-          }}
+          onTablesSynced={handleTablesSynced}
         />
       )}
     </div>
