@@ -1,0 +1,22 @@
+product_id,product_name,category,price,stock_quantity
+1,Smartphone X,Electronics,999,64
+2,Laptop Pro,Electronics,1299,5
+3,Wireless Earbuds,Electronics,199,25
+4,4K TV,Electronics,699,75
+5,Gaming Counsel,Electronics,499,64
+6,Python for Beginners,Books,29,52
+7,Data Science 101,Books,45,98
+8,Sci-Fi Novel,Books,15,58
+9,History of Earth,Books,35,89
+10,Cookbook,Books,25,67
+11,T-Shirt,Clothing,20,80
+12,Jeans,Clothing,50,27
+13,Sneakers,Clothing,80,15
+14,Jacket,Clothing,120,71
+15,Dress,Clothing,60,79
+16,Blender,Home & Kitchen,40,7
+17,Coffee Maker,Home & Kitchen,80,98
+18,Air Fryer,Home & Kitchen,100,30
+19,Yoga Mat,Sports,25,33
+20,Dumbbells,Sports,60,6
+21,Running Shoes,Sports,90,99
