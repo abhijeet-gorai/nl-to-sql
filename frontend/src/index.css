@@ -28,7 +28,7 @@
   --radius-lg: 12px;
   --radius-full: 9999px;
 
-  --sidebar-width: 280px;
+  --sidebar-width: 330px;
 }
 
 [data-theme='dark'] {
@@ -1202,21 +1202,23 @@ img {
   align-items: center;
   gap: 0.5rem;
   padding: 1rem;
-  border: 2px solid var(--border-color);
+  border: 2px solid var(--border-subtle);
   border-radius: 8px;
   cursor: pointer;
   transition: all 0.2s;
   position: relative;
+  background: var(--bg-panel);
 }
 
 .db-type-option:hover:not(.disabled) {
   border-color: var(--accent-primary);
-  background: var(--bg-secondary);
+  background: var(--bg-element);
 }
 
 .db-type-option.selected {
   border-color: var(--accent-primary);
-  background: var(--accent-primary)15;
+  background: var(--accent-surface);
+  box-shadow: 0 0 0 3px var(--accent-surface);
 }
 
 .db-type-option.disabled {

@@ -183,7 +183,7 @@ const ConnectionForm = ({ connection, onClose, onSave }) => {
               </div>
             )}
 
-            <div className="field-group">
+            <div className="field-group" style={{ marginBottom: '1rem' }}>
               <label className="field-label">Connection Name *</label>
               <input
                 type="text"
@@ -221,7 +221,7 @@ const ConnectionForm = ({ connection, onClose, onSave }) => {
               </div>
             </div>
 
-            <div className="editor-row">
+            <div className="editor-row" style={{ marginBottom: '1rem' }}>
               <div className="field-group">
                 <label className="field-label">Host *</label>
                 <input
@@ -247,7 +247,7 @@ const ConnectionForm = ({ connection, onClose, onSave }) => {
               </div>
             </div>
 
-            <div className="field-group">
+            <div className="field-group" style={{ marginBottom: '1rem' }}>
               <label className="field-label">Database Name *</label>
               <input
                 type="text"

@@ -44,7 +44,6 @@ function App() {
   // --- Effects ---
   useEffect(() => {
     setThreadId(Math.random().toString(36).substring(7));
-    document.documentElement.setAttribute('data-theme', theme);
   }, []);
 
   useEffect(() => {
