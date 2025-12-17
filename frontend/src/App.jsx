@@ -140,8 +140,11 @@ function App() {
       const registeredTables = [];
 
       for (const table of tablesToSave) {
-        if (table.isEditing) {
-          // Update existing table
+        // Check if it's an external table (has source_type='external' or schema_name)
+        const isExternalTable = table.source_type !== 'csv';
+        
+        if (table.isEditing || isExternalTable) {
+          // Update existing table OR newly synced external table (both use PUT)
           const res = await fetch(`${API_BASE_URL}/tables/${table.table_name}`, {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
@@ -158,8 +161,13 @@ function App() {
             throw new Error(errorData.detail || "Update failed");
           }
           updatedTables.push(table.table_name);
+          
+          // Add newly synced external tables to selected tables
+          if (isExternalTable && !table.isEditing) {
+            setSelectedTableIds(prev => [...prev, table.table_name]);
+          }
         } else {
-          // Register new table
+          // Register new CSV table (POST /register)
           const res = await fetch(`${API_BASE_URL}/register`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -236,10 +244,21 @@ function App() {
     }));
   };
 
+  // Helper function to get database icon
+  const getDbIcon = (dbType) => {
+    const iconMap = {
+      postgresql: '/postgresql.svg',
+      db2: '/ibm-db2.svg',
+      mysql: '/mysql.svg',
+      oracle: '/oracle.svg'
+    };
+    return iconMap[dbType] || '/data-analytics.svg';
+  };
+
   // Group tables by source
   const groupedTables = React.useMemo(() => {
     const groups = {
-      csv: { name: 'Local CSV Files', icon: '📄', tables: [] },
+      csv: { name: 'Local CSV Files', icon: '📄', isEmoji: true, tables: [] },
     };
 
     tables.forEach(table => {
@@ -251,7 +270,8 @@ function App() {
         if (!groups[key]) {
           groups[key] = {
             name: table.source_name || 'External Database',
-            icon: table.db_type === 'postgresql' ? '🐘' : table.db_type === 'db2' ? '🔷' : '📡',
+            icon: getDbIcon(table.db_type),
+            isEmoji: false,
             tables: [],
             connection_id: table.connection_id
           };
@@ -529,8 +549,7 @@ function App() {
         </label>
 
         <button
-          className="upload-label"
-          style={{ cursor: 'pointer', border: 'none', background: 'transparent' }}
+          className="secondary-button"
           onClick={() => setShowConnectionManager(true)}
         >
           <Link size={16} />
@@ -538,8 +557,7 @@ function App() {
         </button>
 
         <button
-          className="upload-label"
-          style={{ cursor: 'pointer', border: 'none', background: 'transparent' }}
+          className="secondary-button"
           onClick={() => setShowTableBrowser(true)}
         >
           <Database size={16} />
@@ -562,7 +580,11 @@ function App() {
               >
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                   {expandedGroups[groupKey] ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                  <span style={{ fontSize: '1.2rem' }}>{group.icon}</span>
+                  {group.isEmoji ? (
+                    <span style={{ fontSize: '1.2rem' }}>{group.icon}</span>
+                  ) : (
+                    <img src={group.icon} alt={group.name} style={{ width: '20px', height: '20px' }} />
+                  )}
                   <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>{group.name}</span>
                   <span style={{
                     fontSize: '0.75rem',

@@ -152,10 +152,10 @@ const ConnectionForm = ({ connection, onClose, onSave }) => {
   };
 
   const dbTypeOptions = [
-    { value: 'postgresql', label: 'PostgreSQL', icon: '🐘', enabled: true },
-    { value: 'db2', label: 'IBM Db2', icon: '🔷', enabled: true },
-    { value: 'mysql', label: 'MySQL', icon: '🐬', enabled: false },
-    { value: 'oracle', label: 'Oracle', icon: '🔴', enabled: false }
+    { value: 'postgresql', label: 'PostgreSQL', icon: '/postgresql.svg', enabled: true },
+    { value: 'db2', label: 'IBM Db2', icon: '/ibm-db2.svg', enabled: true },
+    { value: 'mysql', label: 'MySQL', icon: '/mysql.svg', enabled: false },
+    { value: 'oracle', label: 'Oracle', icon: '/oracle.svg', enabled: false }
   ];
 
   return (
@@ -213,7 +213,7 @@ const ConnectionForm = ({ connection, onClose, onSave }) => {
                       onChange={handleDbTypeChange}
                       disabled={!option.enabled}
                     />
-                    <span className="db-type-icon">{option.icon}</span>
+                    <img src={option.icon} alt={option.label} className="db-type-icon" />
                     <span className="db-type-label">{option.label}</span>
                     {!option.enabled && <span className="coming-soon">Coming Soon</span>}
                   </label>

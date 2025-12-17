@@ -113,12 +113,12 @@ const ConnectionManager = ({ onClose, onConnectionsChange }) => {
 
   const getDbTypeIcon = (dbType) => {
     const icons = {
-      postgresql: '🐘',
-      db2: '🔷',
-      mysql: '🐬',
-      oracle: '🔴'
+      postgresql: '/postgresql.svg',
+      db2: '/ibm-db2.svg',
+      mysql: '/mysql.svg',
+      oracle: '/oracle.svg'
     };
-    return icons[dbType.toLowerCase()] || '💾';
+    return icons[dbType.toLowerCase()] || '/data-analytics.svg';
   };
 
   const getDbTypeColor = (dbType) => {
@@ -174,11 +174,18 @@ const ConnectionManager = ({ onClose, onConnectionsChange }) => {
           {connections.map(conn => (
             <div key={conn.id} className="connection-card">
               <div className="connection-icon" style={{
-                fontSize: '2rem',
                 background: `${getDbTypeColor(conn.db_type)}15`,
-                color: getDbTypeColor(conn.db_type)
+                padding: '0.75rem',
+                borderRadius: '8px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
               }}>
-                {getDbTypeIcon(conn.db_type)}
+                <img
+                  src={getDbTypeIcon(conn.db_type)}
+                  alt={conn.db_type}
+                  style={{ width: '32px', height: '32px', objectFit: 'contain' }}
+                />
               </div>
               
               <div className="connection-info">

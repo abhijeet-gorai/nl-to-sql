@@ -164,6 +164,32 @@ body {
   transform: translateY(0);
 }
 
+.secondary-button {
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  width: 100%;
+  padding: 0.75rem;
+  background: transparent;
+  border-radius: var(--radius-md);
+  font-weight: 500;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: var(--shadow-glow);
+  border: none;
+}
+
+.secondary-button:hover {
+  transform: translateY(-1px);
+}
+
+.secondary-button:active {
+  transform: translateY(0);
+}
+
 /* Table List */
 .table-list {
   flex: 1;
@@ -1232,7 +1258,9 @@ img {
 }
 
 .db-type-icon {
-  font-size: 2rem;
+  width: 48px;
+  height: 48px;
+  object-fit: contain;
 }
 
 .db-type-label {
