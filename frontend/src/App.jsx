@@ -4,9 +4,11 @@ import remarkGfm from 'remark-gfm';
 import {
   Database, Send, Upload, Sun, Moon,
   Check, ChevronRight, ChevronDown,
-  Terminal, Play, Cpu, Sparkles, User, Trash2, Pencil, RotateCcw
+  Terminal, Play, Cpu, Sparkles, User, Trash2, Pencil, RotateCcw, Link
 } from 'lucide-react';
 import './index.css';
+import ConnectionManager from './components/ConnectionManager';
+import TableBrowser from './components/TableBrowser';
 
 const API_BASE_URL = 'http://localhost:8000';
 
@@ -17,6 +19,7 @@ function App() {
 
   const [tables, setTables] = useState([]);
   const [selectedTableIds, setSelectedTableIds] = useState([]);
+  const [expandedGroups, setExpandedGroups] = useState({ csv: true }); // Track which groups are expanded
 
   const [stagingMetadata, setStagingMetadata] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -32,6 +35,9 @@ function App() {
   // Modal State
   const [deleteConfirm, setDeleteConfirm] = useState({ isOpen: false, tableName: '' });
   const [isClearingChat, setIsClearingChat] = useState(false);
+  const [showConnectionManager, setShowConnectionManager] = useState(false);
+  const [showTableBrowser, setShowTableBrowser] = useState(false);
+  const initialLoadRef = useRef(false);
 
   // --- Effects ---
   useEffect(() => {
@@ -44,6 +50,10 @@ function App() {
   }, [theme]);
 
   useEffect(() => {
+    // Prevent double-invocation in development
+    if (initialLoadRef.current) return;
+    initialLoadRef.current = true;
+    
     fetchTables();
   }, []);
 
@@ -196,18 +206,70 @@ function App() {
 
 
 
+  const toggleGroup = (groupKey) => {
+    setExpandedGroups(prev => ({
+      ...prev,
+      [groupKey]: !prev[groupKey]
+    }));
+  };
+
+  // Group tables by source
+  const groupedTables = React.useMemo(() => {
+    const groups = {
+      csv: { name: 'Local CSV Files', icon: '📄', tables: [] },
+    };
+
+    tables.forEach(table => {
+      if (table.source_type === 'csv' || !table.source_type) {
+        groups.csv.tables.push(table);
+      } else {
+        // External database table
+        const key = `ext_${table.connection_id}`;
+        if (!groups[key]) {
+          groups[key] = {
+            name: table.source_name || 'External Database',
+            icon: table.db_type === 'postgresql' ? '🐘' : table.db_type === 'db2' ? '🔷' : '📡',
+            tables: [],
+            connection_id: table.connection_id
+          };
+        }
+        groups[key].tables.push(table);
+      }
+    });
+
+    // Remove empty groups
+    return Object.entries(groups).filter(([, group]) => group.tables.length > 0);
+  }, [tables]);
+
   const handleTableToggle = (tableName) => {
     // Ensure the table actually exists in the current `tables` state before toggling
-    const tableExists = tables.some(table => table.table_name === tableName);
-    if (!tableExists) {
+    const table = tables.find(t => t.table_name === tableName);
+    if (!table) {
       console.warn(`Attempted to toggle non-existent table: ${tableName}`);
       return;
     }
 
     setSelectedTableIds(prev => {
       if (prev.includes(tableName)) {
+        // Deselecting
         return prev.filter(t => t !== tableName);
       } else {
+        // Selecting - check if we can add this table
+        if (prev.length === 0) {
+          // First selection, allow
+          return [tableName];
+        }
+        
+        // Check if new table is from same source as existing selections
+        const firstSelectedTable = tables.find(t => t.table_name === prev[0]);
+        const newTableSource = table.source_type === 'csv' ? 'csv' : table.connection_id;
+        const existingSource = firstSelectedTable.source_type === 'csv' ? 'csv' : firstSelectedTable.connection_id;
+        
+        if (newTableSource !== existingSource) {
+          alert('You can only select tables from a single database at a time. Please deselect other tables first.');
+          return prev;
+        }
+        
         return [...prev, tableName];
       }
     });
@@ -429,9 +491,27 @@ function App() {
 
         <label className="upload-label">
           <Upload size={16} />
-          <span>New Import</span>
+          <span>Import CSV</span>
           <input type="file" hidden accept=".csv" onChange={handleFileUpload} />
         </label>
+
+        <button
+          className="upload-label"
+          style={{ cursor: 'pointer', border: 'none', background: 'transparent' }}
+          onClick={() => setShowConnectionManager(true)}
+        >
+          <Link size={16} />
+          <span>Connections</span>
+        </button>
+
+        <button
+          className="upload-label"
+          style={{ cursor: 'pointer', border: 'none', background: 'transparent' }}
+          onClick={() => setShowTableBrowser(true)}
+        >
+          <Database size={16} />
+          <span>Browse Tables</span>
+        </button>
 
         <div className="section-label">Datasets</div>
         <div className="table-list">
@@ -440,35 +520,59 @@ function App() {
               No data loaded yet.
             </div>
           )}
-          {tables.map(table => (
-            <div
-              key={table.id}
-              className={`nav-item ${selectedTableIds.includes(table.table_name) ? 'active' : ''}`}
-              onClick={() => handleTableToggle(table.table_name)}
-            >
-              <div className="nav-item-icon">
-                {selectedTableIds.includes(table.table_name) ? <Check size={16} /> : <Database size={16} />}
+          
+          {groupedTables.map(([groupKey, group]) => (
+            <div key={groupKey} className="table-group">
+              <div
+                className="table-group-header"
+                onClick={() => toggleGroup(groupKey)}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  {expandedGroups[groupKey] ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                  <span style={{ fontSize: '1.2rem' }}>{group.icon}</span>
+                  <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>{group.name}</span>
+                  <span style={{
+                    fontSize: '0.75rem',
+                    color: 'var(--text-tertiary)',
+                    marginLeft: '0.25rem'
+                  }}>
+                    ({group.tables.length})
+                  </span>
+                </div>
               </div>
-              <div className="nav-item-info">
-                <div className="nav-item-title">{table.table_name}</div>
-                <div className="nav-item-sub">{table.description || "No description"}</div>
-              </div>
-              <div className="nav-item-actions" style={{ marginLeft: 'auto', display: 'flex', gap: '0.25rem' }}>
-                <button
-                  className="icon-btn edit-btn"
-                  onClick={(e) => handleEditTable(e, table)}
-                  title="Edit Metadata"
+              
+              {expandedGroups[groupKey] && group.tables.map(table => (
+                <div
+                  key={table.id}
+                  className={`nav-item ${selectedTableIds.includes(table.table_name) ? 'active' : ''}`}
+                  onClick={() => handleTableToggle(table.table_name)}
+                  style={{ marginLeft: '1rem' }}
                 >
-                  <Pencil size={14} />
-                </button>
-                <button
-                  className="icon-btn delete-btn"
-                  onClick={(e) => handleDeleteTable(e, table.table_name)}
-                  title="Delete Table"
-                >
-                  <Trash2 size={14} />
-                </button>
-              </div>
+                  <div className="nav-item-icon">
+                    {selectedTableIds.includes(table.table_name) ? <Check size={16} /> : <Database size={16} />}
+                  </div>
+                  <div className="nav-item-info">
+                    <div className="nav-item-title">{table.table_name}</div>
+                    <div className="nav-item-sub">{table.description || "No description"}</div>
+                  </div>
+                  <div className="nav-item-actions" style={{ marginLeft: 'auto', display: 'flex', gap: '0.25rem' }}>
+                    <button
+                      className="icon-btn edit-btn"
+                      onClick={(e) => handleEditTable(e, table)}
+                      title="Edit Metadata"
+                    >
+                      <Pencil size={14} />
+                    </button>
+                    <button
+                      className="icon-btn delete-btn"
+                      onClick={(e) => handleDeleteTable(e, table.table_name)}
+                      title="Delete Table"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                </div>
+              ))}
             </div>
           ))}
         </div>
@@ -670,6 +774,27 @@ function App() {
         )}
 
       </main>
+
+      {/* Connection Manager Modal */}
+      {showConnectionManager && (
+        <ConnectionManager
+          onClose={() => setShowConnectionManager(false)}
+          onConnectionsChange={() => {
+            // Optionally refresh tables when connections change
+            fetchTables();
+          }}
+        />
+      )}
+
+      {/* Table Browser Modal */}
+      {showTableBrowser && (
+        <TableBrowser
+          onClose={() => setShowTableBrowser(false)}
+          onTablesSynced={() => {
+            fetchTables();
+          }}
+        />
+      )}
     </div>
   );
 }

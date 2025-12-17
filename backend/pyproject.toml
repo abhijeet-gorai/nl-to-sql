@@ -17,4 +17,9 @@ dependencies = [
     "python-multipart>=0.0.20",
     "sqlalchemy>=2.0.45",
     "uvicorn>=0.38.0",
+    # Multi-database support
+    "psycopg2-binary>=2.9.9",
+    "ibm-db>=3.2.3",
+    "cryptography>=41.0.0",
+    "sqlparse>=0.4.4",
 ]

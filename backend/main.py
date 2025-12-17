@@ -1,3 +1,7 @@
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from fastapi import FastAPI, UploadFile, File, HTTPException, Body
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -8,9 +12,9 @@ import os
 import uuid
 # Import our local modules
 import db, agent
-from dotenv import load_dotenv
-
-load_dotenv()
+import connection_manager as cm
+import metadata_extractor as me
+import query_router
 
 app = FastAPI()
 
@@ -36,6 +40,7 @@ app.mount("/charts", StaticFiles(directory=CHARTS_DIR), name="charts")
 @app.on_event("startup")
 async def startup_event():
     db.init_db()
+    cm.init_connections_table()
 
 class ChatRequest(BaseModel):
     message: str
@@ -123,9 +128,161 @@ async def update_table(table_name: str, request: UpdateMetadataRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# ============================================
+# Connection Management Endpoints
+# ============================================
+
+class ConnectionCreate(BaseModel):
+    connection_name: str
+    db_type: str  # 'postgresql', 'db2', 'mysql', 'oracle'
+    host: str
+    port: int
+    database_name: str
+    username: str
+    password: str
+    ssl_enabled: bool = False
+    connection_params: Dict = {}
+
+class ConnectionUpdate(BaseModel):
+    host: Optional[str] = None
+    port: Optional[int] = None
+    database_name: Optional[str] = None
+    username: Optional[str] = None
+    password: Optional[str] = None
+    ssl_enabled: Optional[bool] = None
+    is_active: Optional[bool] = None
+
+class TableSyncRequest(BaseModel):
+    tables: List[Dict]  # [{"schema": "public", "table_name": "customers"}, ...]
+
+@app.post("/connections")
+async def create_connection(connection: ConnectionCreate):
+    """Create a new database connection"""
+    try:
+        connection_id = cm.create_connection(connection.dict())
+        return {"status": "success", "connection_id": connection_id}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.get("/connections")
+async def list_connections():
+    """List all database connections"""
+    return cm.get_all_connections()
+
+@app.get("/connections/{connection_id}")
+async def get_connection_details(connection_id: int):
+    """Get connection details (without password)"""
+    connection = cm.get_connection(connection_id)
+    if not connection:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    # Don't return password
+    connection.pop('password', None)
+    return connection
+
+@app.put("/connections/{connection_id}")
+async def update_connection(connection_id: int, update: ConnectionUpdate):
+    """Update an existing connection"""
+    try:
+        success = cm.update_connection(connection_id, update.dict(exclude_unset=True))
+        if not success:
+            raise HTTPException(status_code=404, detail="Connection not found")
+        return {"status": "success"}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.delete("/connections/{connection_id}")
+async def delete_connection(connection_id: int):
+    """Delete a database connection"""
+    success = cm.delete_connection(connection_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    return {"status": "success"}
+
+@app.post("/connections/{connection_id}/test")
+async def test_connection(connection_id: int):
+    """Test a database connection"""
+    result = cm.test_connection(connection_id)
+    if not result['success']:
+        raise HTTPException(status_code=400, detail=result['message'])
+    return result
+
+@app.post("/connections/test")
+async def test_connection_data(connection: ConnectionCreate):
+    """Test connection without saving it"""
+    result = cm.test_connection_data(connection.dict())
+    if not result['success']:
+        raise HTTPException(status_code=400, detail=result['message'])
+    return result
+
+# ============================================
+# Table Discovery Endpoints
+# ============================================
+
+@app.get("/connections/{connection_id}/schemas")
+async def list_schemas(connection_id: int):
+    """List all schemas in a database"""
+    try:
+        connector = cm.get_connector(connection_id)
+        schemas = connector.get_schemas()
+        connector.disconnect()
+        return {"schemas": schemas}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/connections/{connection_id}/tables")
+async def list_tables(connection_id: int, schema: str = None):
+    """List all tables in a schema"""
+    try:
+        tables = me.discover_tables(connection_id, schema)
+        return {"tables": tables}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/connections/{connection_id}/tables/{table_name}")
+async def get_table_metadata_endpoint(connection_id: int, table_name: str, schema: str = "public"):
+    """Get detailed metadata for a table"""
+    try:
+        metadata = me.extract_table_metadata(connection_id, schema, table_name)
+        return metadata
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/connections/{connection_id}/tables/sync")
+async def sync_tables(connection_id: int, request: TableSyncRequest):
+    """Sync selected tables from external database"""
+    try:
+        success = me.sync_external_tables(connection_id, request.tables)
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to sync tables")
+        return {"status": "success", "synced_count": len(request.tables)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/connections/{connection_id}/tables/{table_name}/preview")
+async def preview_table(connection_id: int, table_name: str, schema: str = "public", limit: int = 100):
+    """Preview data from a table"""
+    try:
+        connector = cm.get_connector(connection_id)
+        df = connector.get_sample_data(schema, table_name, limit)
+        connector.disconnect()
+        
+        return {
+            "columns": df.columns.tolist(),
+            "data": df.fillna("").to_dict(orient="records"),
+            "row_count": len(df)
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/external-tables")
+async def list_external_tables(connection_id: Optional[int] = None):
+    """List all external tables"""
+    return me.get_external_tables(connection_id)
+
 @app.get("/tables")
 async def get_tables():
-    return db.get_all_tables()
+    """Get all available tables (CSV + External)"""
+    return query_router.get_all_available_tables()
 
 @app.delete("/tables/{table_name}")
 async def delete_table(table_name: str):

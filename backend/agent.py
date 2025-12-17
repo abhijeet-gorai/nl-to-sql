@@ -1,12 +1,16 @@
 from langchain_ibm import ChatWatsonx
-from langchain_core.tools import tool
-from langgraph.prebuilt import create_react_agent
+from langchain.tools import tool, ToolRuntime
+from langchain.agents import AgentState, create_agent
 from langgraph.checkpoint.memory import MemorySaver
 import os
 import db
+import query_router
 from dotenv import load_dotenv
 
 load_dotenv()
+
+class CustomState(AgentState):
+    selected_tables: list[str]
 
 # Initialize Watsonx Chat Model
 # Ideally these are set in environment variables:
@@ -29,15 +33,24 @@ import pandas as pd
 import uuid
 
 @tool
-def execute_query(query: str) -> str:
-    """Executes a SQL SELECT query against the database and returns the results."""
-    return str(db.execute_query(query))
+def execute_query(query: str, runtime: ToolRuntime) -> str:
+    """Executes a SQL SELECT query against the database and returns the results.
+    Supports both local CSV tables and external database tables."""
+    try:
+        selected_tables = runtime.state["selected_tables"]
+        df = query_router.execute_federated_query(query, selected_tables)
+        if df is None or df.empty:
+            return "Query returned no results."
+        return df.to_markdown(index=False)
+    except Exception as e:
+        return f"Error executing query: {str(e)}"
 
 @tool
-def generate_chart(query: str, chart_type: str, x_col: str, y_col: str, title: str = "") -> str:
+def generate_chart(query: str, chart_type: str, x_col: str, y_col: str, runtime: ToolRuntime, title: str = "") -> str:
     """
     Generates a STANDARD chart (bar, line, pie, scatter) from a SQL query.
     Use this for simple, single-series visualizations.
+    Supports both local CSV tables and external database tables.
     args:
         query: The SQL query to fetch data.
         chart_type: 'bar', 'line', 'pie', or 'scatter'.
@@ -45,8 +58,9 @@ def generate_chart(query: str, chart_type: str, x_col: str, y_col: str, title: s
         y_col: Column name for Y axis.
         title: Chart title.
     """
-    # ... existing implementation ...
-    df = db.get_raw_dataframe(query)
+    # Use federated query router with selected tables
+    selected_tables = runtime.state["selected_tables"]
+    df = query_router.execute_federated_query(query, selected_tables)
     if df is None or df.empty:
         return "Error: Query returned no data."
     
@@ -94,7 +108,7 @@ def generate_chart(query: str, chart_type: str, x_col: str, y_col: str, title: s
         return f"Error generating chart: {e}"
 
 @tool
-def generate_custom_chart(python_code: str) -> str:
+def generate_custom_chart(python_code: str, runtime: ToolRuntime) -> str:
     """
     Generates a CUSTOM or COMPLEX chart by executing Python code.
     Use this when 'generate_chart' is insufficient (e.g., dual-axis, subplots, heatmaps, or advanced formatting).
@@ -102,25 +116,35 @@ def generate_custom_chart(python_code: str) -> str:
     The code has access to:
     - 'pd' (pandas)
     - 'plt' (matplotlib.pyplot)
-    - 'db' (database module)
-    - 'sqlite3'
-    - 'DB_PATH' (string path to database)
+    - 'query_router' (federated query router module)
+    - 'selected_tables' (list of currently selected table names)
 
     Instructions for code:
-    1. Connect to DB using sqlite3 or use db.get_raw_dataframe(query).
+    1. Fetch data using: df = query_router.execute_federated_query(your_sql_query, selected_tables)
     2. Create a figure using plt.figure().
-    3. Plot data.
-    4. Data MUST be fetched inside the code.
+    3. Plot data using matplotlib.
+    4. Data MUST be fetched inside the code using the query_router.
     5. DO NOT show() or save() the plot. The system handles saving.
+    
+    Example:
+    ```python
+    # Fetch data from selected tables
+    df = query_router.execute_federated_query("SELECT * FROM customers LIMIT 100", selected_tables)
+    
+    # Create chart
+    plt.figure(figsize=(10, 6))
+    plt.bar(df['category'], df['count'])
+    plt.title('My Chart')
+    ```
     """
     try:
-        # Define secure-ish locals
+        selected_tables = runtime.state["selected_tables"]
+        # Define secure-ish locals with federated query support
         local_scope = {
             "pd": pd,
             "plt": plt,
-            "db": db,
-            "sqlite3": db.sqlite3, # db imports sqlite3
-            "DB_PATH": db.DB_PATH
+            "query_router": query_router,
+            "selected_tables": selected_tables  # Pass selected tables to the code
         }
         
         # Execute the code
@@ -158,7 +182,7 @@ validate_creds()
 # We use a memory saver to persist state across turns if needed (though REST API is stateless usually,
 # we can pass thread_id to resume).
 memory = MemorySaver()
-agent_executor = create_react_agent(llm, tools, checkpointer=memory)
+agent_executor = create_agent(llm, tools, checkpointer=memory, state_schema=CustomState)
 
 from langchain_core.messages import AIMessage, ToolMessage
 
@@ -223,11 +247,13 @@ def generate_table_metadata(preview_data: dict, filename: str, existing_tables: 
 async def stream_question(user_question: str, selected_tables: list[str], thread_id: str = "1"):
     """
     Streams events (tool usage, response tokens) from the agent.
+    Supports both local CSV tables and external database tables.
     """
+    
     config = {"configurable": {"thread_id": thread_id}}
     
-    # Fetch context for selected tables
-    context = db.get_table_context(selected_tables)
+    # Fetch context for selected tables using federated context builder
+    context = query_router.build_table_context_federated(selected_tables)
     
     # Construct augmented prompt
     augmented_question = f"""
@@ -238,11 +264,13 @@ async def stream_question(user_question: str, selected_tables: list[str], thread
     
     Instructions:
     1. PRIVACY: Do not query tables that are not listed above.
+    2. IMPORTANT: Tables may come from different sources (local CSV or external databases).
+    3. When querying external database tables, use schema_name.table_name for the table name.
     """
-    
+    print(augmented_question)
     # Use astream_events to get granular updates including tokens
     async for event in agent_executor.astream_events(
-        {"messages": [("user", augmented_question)]},
+        {"messages": [("user", augmented_question)], "selected_tables": selected_tables},
         config,
         version="v1"
     ):
