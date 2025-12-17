@@ -273,16 +273,21 @@ const TableBrowser = ({ onClose, onTablesSynced }) => {
         </div>
 
         <div className="browser-header">
-          <label className="checkbox-label">
+          <label className="table-checkbox">
             <input
               type="checkbox"
               checked={selectedTables.size === filteredTables.length && filteredTables.length > 0}
               onChange={handleSelectAll}
               disabled={filteredTables.length === 0}
             />
-            <span>
-              {selectedTables.size > 0 
-                ? `${selectedTables.size} selected` 
+            {selectedTables.size === filteredTables.length && filteredTables.length > 0 ? (
+              <CheckSquare size={18} color="var(--accent-primary)" />
+            ) : (
+              <Square size={18} color="var(--text-tertiary)" />
+            )}
+            <span style={{ marginLeft: '8px' }}>
+              {selectedTables.size > 0
+                ? `${selectedTables.size} selected`
                 : `Select All (${filteredTables.length})`
               }
             </span>
@@ -320,7 +325,7 @@ const TableBrowser = ({ onClose, onTablesSynced }) => {
                     <Square size={18} color="var(--text-tertiary)" />
                   )}
                 </label>
-                <div className="table-info">
+                <div className="table-info" onClick={() => handleTableToggle(table.table_name)}>
                   <div className="table-name">
                     {table.table_name}
                     {syncedTables.has(table.table_name) && (
@@ -438,5 +443,3 @@ const TableBrowser = ({ onClose, onTablesSynced }) => {
 };
 
 export default TableBrowser;
-
-// Made with Bob
