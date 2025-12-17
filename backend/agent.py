@@ -4,6 +4,9 @@ from langgraph.prebuilt import create_react_agent
 from langgraph.checkpoint.memory import MemorySaver
 import os
 import db
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Initialize Watsonx Chat Model
 # Ideally these are set in environment variables:
