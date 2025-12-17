@@ -19,7 +19,7 @@ ENCRYPTION_KEY = os.getenv('DB_ENCRYPTION_KEY')
 if not ENCRYPTION_KEY:
     # Generate a key for development (in production, this should be set)
     ENCRYPTION_KEY = Fernet.generate_key()
-    print(f"WARNING: Using generated encryption key. Set DB_ENCRYPTION_KEY in production.")
+    print("WARNING: Using generated encryption key. Set DB_ENCRYPTION_KEY in production.")
     print(f"Generated key: {ENCRYPTION_KEY.decode()}")
 
 cipher_suite = Fernet(ENCRYPTION_KEY if isinstance(ENCRYPTION_KEY, bytes) else ENCRYPTION_KEY.encode())

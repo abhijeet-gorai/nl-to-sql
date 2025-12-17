@@ -4,7 +4,7 @@ Provides unified interface for connecting to different database types
 """
 
 from abc import ABC, abstractmethod
-from typing import List, Dict, Optional
+from typing import List, Dict
 import pandas as pd
 from dataclasses import dataclass
 
@@ -200,7 +200,7 @@ class PostgreSQLConnector(DatabaseConnector):
         
         # Get row count estimate
         try:
-            cursor.execute(f"""
+            cursor.execute("""
                 SELECT reltuples::bigint AS estimate
                 FROM pg_class
                 WHERE oid = %s::regclass

@@ -2,7 +2,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, Body
+from fastapi import FastAPI, UploadFile, File, HTTPException
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -11,7 +11,8 @@ import shutil
 import os
 import uuid
 # Import our local modules
-import db, agent
+import db
+import agent
 import connection_manager as cm
 import metadata_extractor as me
 import query_router
@@ -111,7 +112,7 @@ async def register_table(request: RegisterRequest):
         if os.path.exists(request.file_path):
             os.remove(request.file_path)
             
-        return {"status": "success", "table_name": request.metadata['table_name']}
+        return {"status": success, "table_name": request.metadata['table_name']}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

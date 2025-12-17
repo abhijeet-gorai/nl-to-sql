@@ -65,8 +65,10 @@ def analyze_csv(file_path: str, original_filename: str) -> Dict:
             dtype = "TEXT" # Default
             if col in df_preview.columns:
                  pd_type = str(df_preview[col].dtype)
-                 if 'int' in pd_type: dtype = "INTEGER"
-                 elif 'float' in pd_type: dtype = "REAL"
+                 if 'int' in pd_type: 
+                    dtype = "INTEGER"
+                 elif 'float' in pd_type: 
+                    dtype = "REAL"
             
             columns.append({
                 "name": col,
