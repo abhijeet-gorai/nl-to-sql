@@ -287,5 +287,3 @@ def get_all_available_tables() -> List[Dict]:
     conn.close()
     
     return tables
-
-# Made with Bob

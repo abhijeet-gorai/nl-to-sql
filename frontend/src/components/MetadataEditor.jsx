@@ -151,5 +151,3 @@ const MetadataEditor = ({
 };
 
 export default MetadataEditor;
-
-// Made with Bob

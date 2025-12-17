@@ -313,5 +313,3 @@ const ConnectionManager = ({ onClose, onConnectionsChange }) => {
 };
 
 export default ConnectionManager;
-
-// Made with Bob

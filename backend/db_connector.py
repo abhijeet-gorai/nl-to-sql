@@ -418,5 +418,3 @@ def get_connector_class(db_type: str):
         return DB2Connector
     else:
         raise ValueError(f"Unsupported database type: {db_type}")
-
-# Made with Bob

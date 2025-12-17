@@ -68,5 +68,3 @@ const CustomSelect = ({
 };
 
 export default CustomSelect;
-
-// Made with Bob

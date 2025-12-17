@@ -286,5 +286,3 @@ def get_selected_external_tables() -> List[Dict]:
     
     conn.close()
     return tables
-
-# Made with Bob

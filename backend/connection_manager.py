@@ -313,5 +313,3 @@ def test_connection_data(connection_data: Dict) -> Dict:
             "success": False,
             "message": str(e)
         }
-
-# Made with Bob

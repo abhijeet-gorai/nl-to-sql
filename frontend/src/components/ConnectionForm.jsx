@@ -354,5 +354,3 @@ const ConnectionForm = ({ connection, onClose, onSave }) => {
 };
 
 export default ConnectionForm;
-
-// Made with Bob
