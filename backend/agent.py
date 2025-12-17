@@ -21,9 +21,8 @@ llm = ChatWatsonx(
     url=os.getenv("WATSONX_URL", "https://us-south.ml.cloud.ibm.com"),
     project_id=os.getenv("WATSONX_PROJECT_ID"),
     params={
-        "decoding_method": "greedy",
-        "max_new_tokens": 1000,
-        "min_new_tokens": 1
+        "temperature": 0,
+        "max_tokens": 4000,
     }
 )
 
