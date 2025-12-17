@@ -1,16 +1,41 @@
-# React + Vite
+# DataTalk Frontend
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+The user interface for DataTalk, built with React and Vite. It features a modern, responsive design optimized for data exploration and chat interactions.
 
-Currently, two official plugins are available:
+## 🎨 UI Features
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+*   **Glassmorphism Design**: sleek, translucent panels with a dynamic background.
+*   **Theme Engine**: Built-in Dark Mode and Light Mode, toggled via CSS variables.
+*   **Sidebar Navigation**: fast access to uploads and uploaded datasets.
+*   **Markdown Support**: Renders tables, code blocks, and images (charts) directly in the chat.
+*   **Reasoning Accordion**: Collapsible "View Reasoning" blocks to see the AI's internal thought process (SQL queries, code execution) without cluttering the chat.
 
-## React Compiler
+## 🏗 Component Structure
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+*   **`App.jsx`**: The main controller. Handles:
+    *   State management (tables, messages, view modes).
+    *   API calls to the backend.
+    *   Streaming response parsing (Server-Sent Events / NDJSON).
+    *   View switching (Empty State, Metadata Editor, Chat).
+*   **`ConfirmationModal`**: Reusable modal for critical actions (Delete Table, Clear Chat).
+*   **`ReasoningAccordion`**: specialized component to display the agent's step-by-step logic.
+*   **`index.css`**: Contains all styling tokens (`:root` variables) and utility classes.
 
-## Expanding the ESLint configuration
+## 🚀 Setup & Run
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+1.  **Install Dependencies**
+    ```bash
+    npm install
+    ```
+
+2.  **Development Server**
+    ```bash
+    npm run dev
+    ```
+    By default, it proxies requests or expects the backend at `http://localhost:8000`.
+
+## 📦 Key Libraries
+
+*   `lucide-react`: Iconography.
+*   `react-markdown`: Rendering AI responses.
+*   `remark-gfm`: GitHub Flavored Markdown support (tables, strikethrough).
