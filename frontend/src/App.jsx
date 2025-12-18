@@ -21,7 +21,8 @@ function App() {
 
   const [tables, setTables] = useState([]);
   const [selectedTableIds, setSelectedTableIds] = useState([]);
-  const [expandedGroups, setExpandedGroups] = useState({ csv: true }); // Track which groups are expanded
+  const [expandedGroups, setExpandedGroups] = useState({ csv: true }); // Track which connection groups are expanded
+  const [expandedSchemas, setExpandedSchemas] = useState({}); // Track which schemas are expanded
 
   const [stagingMetadata, setStagingMetadata] = useState(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -249,6 +250,13 @@ function App() {
     }));
   };
 
+  const toggleSchema = (schemaKey) => {
+    setExpandedSchemas(prev => ({
+      ...prev,
+      [schemaKey]: !prev[schemaKey]
+    }));
+  };
+
   // Helper function to get database icon
   const getDbIcon = (dbType) => {
     const iconMap = {
@@ -260,7 +268,7 @@ function App() {
     return iconMap[dbType] || '/data-analytics.svg';
   };
 
-  // Group tables by source
+  // Group tables by source with schema hierarchy for external databases
   const groupedTables = React.useMemo(() => {
     const groups = {
       csv: { name: 'Local CSV Files', icon: '📄', isEmoji: true, tables: [] },
@@ -270,23 +278,47 @@ function App() {
       if (table.source_type === 'csv' || !table.source_type) {
         groups.csv.tables.push(table);
       } else {
-        // External database table
-        const key = `ext_${table.connection_id}`;
-        if (!groups[key]) {
-          groups[key] = {
+        // External database table - group by connection, then by schema
+        const connKey = `ext_${table.connection_id}`;
+        if (!groups[connKey]) {
+          groups[connKey] = {
             name: table.source_name || 'External Database',
             icon: getDbIcon(table.db_type),
             isEmoji: false,
-            tables: [],
-            connection_id: table.connection_id
+            connection_id: table.connection_id,
+            schemas: {}
           };
         }
-        groups[key].tables.push(table);
+        
+        // Group tables by schema within the connection
+        const schemaName = table.schema_name || 'default';
+        if (!groups[connKey].schemas[schemaName]) {
+          groups[connKey].schemas[schemaName] = {
+            name: schemaName,
+            tables: []
+          };
+        }
+        groups[connKey].schemas[schemaName].tables.push(table);
       }
     });
 
-    // Remove empty groups
-    return Object.entries(groups).filter(([, group]) => group.tables.length > 0);
+    // Remove empty groups and convert schemas object to array
+    return Object.entries(groups)
+      .filter(([key, group]) => {
+        if (key === 'csv') return group.tables.length > 0;
+        return Object.keys(group.schemas).length > 0;
+      })
+      .map(([key, group]) => {
+        if (key === 'csv') return [key, group];
+        // Convert schemas object to array for external connections
+        return [key, {
+          ...group,
+          schemas: Object.entries(group.schemas).map(([schemaName, schema]) => ({
+            key: `${key}_${schemaName}`,
+            ...schema
+          }))
+        }];
+      });
   }, [tables]);
 
   const handleTableToggle = (tableName) => {
@@ -596,6 +628,7 @@ function App() {
           
           {groupedTables.map(([groupKey, group]) => (
             <div key={groupKey} className="table-group">
+              {/* Connection Level */}
               <div
                 className="table-group-header"
                 onClick={() => toggleGroup(groupKey)}
@@ -613,43 +646,106 @@ function App() {
                     color: 'var(--text-tertiary)',
                     marginLeft: '0.25rem'
                   }}>
-                    ({group.tables.length})
+                    {groupKey === 'csv' ? `(${group.tables.length})` : `(${group.schemas.length} schemas)`}
                   </span>
                 </div>
               </div>
               
-              {expandedGroups[groupKey] && group.tables.map(table => (
-                <div
-                  key={table.id}
-                  className={`nav-item ${selectedTableIds.includes(table.table_name) ? 'active' : ''}`}
-                  onClick={() => handleTableToggle(table.table_name)}
-                  style={{ marginLeft: '1rem' }}
-                >
-                  <div className="nav-item-icon">
-                    {selectedTableIds.includes(table.table_name) ? <Check size={16} /> : <Database size={16} />}
-                  </div>
-                  <div className="nav-item-info">
-                    <div className="nav-item-title">{table.table_name}</div>
-                    <div className="nav-item-sub">{table.description || "No description"}</div>
-                  </div>
-                  <div className="nav-item-actions" style={{ marginLeft: 'auto', display: 'flex', gap: '0.25rem' }}>
-                    <button
-                      className="icon-btn edit-btn"
-                      onClick={(e) => handleEditTable(e, table)}
-                      title="Edit Metadata"
+              {expandedGroups[groupKey] && (
+                <>
+                  {/* CSV Files - Direct table list */}
+                  {groupKey === 'csv' && group.tables.map(table => (
+                    <div
+                      key={table.id}
+                      className={`nav-item ${selectedTableIds.includes(table.table_name) ? 'active' : ''}`}
+                      onClick={() => handleTableToggle(table.table_name)}
+                      style={{ marginLeft: '1rem' }}
                     >
-                      <Pencil size={14} />
-                    </button>
-                    <button
-                      className="icon-btn delete-btn"
-                      onClick={(e) => handleDeleteTable(e, table.table_name)}
-                      title="Delete Table"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                </div>
-              ))}
+                      <div className="nav-item-icon">
+                        {selectedTableIds.includes(table.table_name) ? <Check size={16} /> : <Database size={16} />}
+                      </div>
+                      <div className="nav-item-info">
+                        <div className="nav-item-title">{table.table_name}</div>
+                        <div className="nav-item-sub">{table.description || "No description"}</div>
+                      </div>
+                      <div className="nav-item-actions" style={{ marginLeft: 'auto', display: 'flex', gap: '0.25rem' }}>
+                        <button
+                          className="icon-btn edit-btn"
+                          onClick={(e) => handleEditTable(e, table)}
+                          title="Edit Metadata"
+                        >
+                          <Pencil size={14} />
+                        </button>
+                        <button
+                          className="icon-btn delete-btn"
+                          onClick={(e) => handleDeleteTable(e, table.table_name)}
+                          title="Delete Table"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                  
+                  {/* External Databases - Schema → Tables hierarchy */}
+                  {groupKey !== 'csv' && group.schemas.map(schema => (
+                    <div key={schema.key} style={{ marginLeft: '1rem' }}>
+                      {/* Schema Level */}
+                      <div
+                        className="table-group-header"
+                        onClick={() => toggleSchema(schema.key)}
+                        style={{ padding: '0.5rem 0.75rem' }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                          {expandedSchemas[schema.key] ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                          <span style={{ fontWeight: 500, fontSize: '0.85rem' }}>{schema.name}</span>
+                          <span style={{
+                            fontSize: '0.7rem',
+                            color: 'var(--text-tertiary)',
+                            marginLeft: '0.25rem'
+                          }}>
+                            ({schema.tables.length})
+                          </span>
+                        </div>
+                      </div>
+                      
+                      {/* Tables in Schema */}
+                      {expandedSchemas[schema.key] && schema.tables.map(table => (
+                        <div
+                          key={table.id}
+                          className={`nav-item ${selectedTableIds.includes(table.table_name) ? 'active' : ''}`}
+                          onClick={() => handleTableToggle(table.table_name)}
+                          style={{ marginLeft: '1rem' }}
+                        >
+                          <div className="nav-item-icon">
+                            {selectedTableIds.includes(table.table_name) ? <Check size={16} /> : <Database size={16} />}
+                          </div>
+                          <div className="nav-item-info">
+                            <div className="nav-item-title">{table.table_name}</div>
+                            <div className="nav-item-sub">{table.description || "No description"}</div>
+                          </div>
+                          <div className="nav-item-actions" style={{ marginLeft: 'auto', display: 'flex', gap: '0.25rem' }}>
+                            <button
+                              className="icon-btn edit-btn"
+                              onClick={(e) => handleEditTable(e, table)}
+                              title="Edit Metadata"
+                            >
+                              <Pencil size={14} />
+                            </button>
+                            <button
+                              className="icon-btn delete-btn"
+                              onClick={(e) => handleDeleteTable(e, table.table_name)}
+                              title="Delete Table"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </>
+              )}
             </div>
           ))}
         </div>
