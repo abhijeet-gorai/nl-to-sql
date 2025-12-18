@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import rehypeRaw from 'rehype-raw';
 import {
   Database, Send, Upload, Sun, Moon,
   Check, ChevronRight, ChevronDown,
@@ -28,6 +29,10 @@ function App() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  
+  // Track expanded state for reasoning accordions and steps
+  const [expandedReasonings, setExpandedReasonings] = useState({});
+  const [expandedSteps, setExpandedSteps] = useState({});
 
 
   const messagesEndRef = useRef(null);
@@ -410,6 +415,8 @@ function App() {
   const confirmClearChat = () => {
     setMessages([]);
     setThreadId(Math.random().toString(36).substring(7));
+    setExpandedReasonings({});
+    setExpandedSteps({});
     setIsClearingChat(false);
   };
 
@@ -425,13 +432,21 @@ function App() {
     </div>
   );
 
-  // New: Individual Step Item
-  const StepItem = ({ step }) => {
-    const [isExpanded, setIsExpanded] = useState(false);
+  // Individual Step Item with persistent state
+  const StepItem = ({ step, messageIdx, stepIdx }) => {
+    const stepKey = `${messageIdx}-${stepIdx}`;
+    const isExpanded = expandedSteps[stepKey] || false;
+
+    const toggleStep = () => {
+      setExpandedSteps(prev => ({
+        ...prev,
+        [stepKey]: !prev[stepKey]
+      }));
+    };
 
     return (
       <div className="step-item">
-        <div className="step-header" onClick={() => setIsExpanded(!isExpanded)}>
+        <div className="step-header" onClick={toggleStep}>
           <div style={{ transition: 'transform 0.2s', transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)', display: 'flex' }}>
             <ChevronRight size={14} color="var(--text-tertiary)" />
           </div>
@@ -458,20 +473,27 @@ function App() {
     );
   };
 
-  // Updated: Main Accordion
-  const ReasoningAccordion = ({ steps }) => {
-    const [isOpen, setIsOpen] = useState(false);
+  // Main Accordion with persistent state
+  const ReasoningAccordion = ({ steps, messageIdx }) => {
+    const isOpen = expandedReasonings[messageIdx] || false;
+
+    const toggleReasoning = () => {
+      setExpandedReasonings(prev => ({
+        ...prev,
+        [messageIdx]: !prev[messageIdx]
+      }));
+    };
 
     return (
       <div className="reasoning-block">
-        <div className="reasoning-header" onClick={() => setIsOpen(!isOpen)}>
+        <div className="reasoning-header" onClick={toggleReasoning}>
           {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
           <span>View Reasoning Process ({steps.length} steps)</span>
         </div>
         {isOpen && (
           <div className="reasoning-content">
             {steps.map((step, i) => (
-              <StepItem key={i} step={step} />
+              <StepItem key={i} step={step} messageIdx={messageIdx} stepIdx={i} />
             ))}
           </div>
         )}
@@ -710,10 +732,22 @@ function App() {
                       ) : (
                         <>
                           <div className="msg-content">
-                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{msg.content}</ReactMarkdown>
+                            <ReactMarkdown 
+                              remarkPlugins={[remarkGfm]}
+                              rehypePlugins={[rehypeRaw]}
+                              components={{
+                                table: ({node, ...props}) => (
+                                  <div className="table-wrapper">
+                                    <table {...props} />
+                                  </div>
+                                )
+                              }}
+                            >
+                              {msg.content}
+                            </ReactMarkdown>
                           </div>
                           {msg.steps && msg.steps.length > 0 && (
-                            <ReasoningAccordion steps={msg.steps} />
+                            <ReasoningAccordion steps={msg.steps} messageIdx={idx} />
                           )}
                         </>
                       )}

@@ -681,9 +681,9 @@ body {
 
 .msg-content table {
   width: 100%;
-  min-width: 500px;
   border-collapse: collapse;
   font-size: 0.9rem;
+  min-width: max-content;
 }
 
 .msg-content th,
@@ -697,9 +697,16 @@ body {
 .msg-content th {
   background: var(--bg-element);
   font-weight: 600;
-  position: sticky;
-  top: 0;
-  z-index: 1;
+}
+
+.table-wrapper {
+    display: block;
+    width: 100%;
+    overflow-x: auto; /* This turns on the scrollbar when needed */
+    -webkit-overflow-scrolling: touch; /* Smooth scrolling on mobile */
+    margin-bottom: 1rem;
+    border-radius: var(--radius-md); /* Optional: matches your theme */
+    border: 1px solid var(--border-subtle); /* Optional: distinct container look */
 }
 
 /* Reasoning Block */
