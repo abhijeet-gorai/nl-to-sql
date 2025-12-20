@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Database, Plus, Trash2, Edit, CheckCircle, XCircle, Loader, X } from 'lucide-react';
 import ConnectionForm from './ConnectionForm';
+import './ConnectionManager.css';
 
 const API_BASE_URL = 'http://localhost:8000';
 
@@ -35,13 +36,13 @@ const ConnectionManager = ({ onClose, onConnectionsChange }) => {
   const handleTest = async (connectionId) => {
     setTestingId(connectionId);
     setTestResults(prev => ({ ...prev, [connectionId]: null }));
-    
+
     try {
       const res = await fetch(`${API_BASE_URL}/connections/${connectionId}/test`, {
         method: 'POST'
       });
       const result = await res.json();
-      
+
       setTestResults(prev => ({
         ...prev,
         [connectionId]: {
@@ -49,7 +50,7 @@ const ConnectionManager = ({ onClose, onConnectionsChange }) => {
           message: result.version || result.message
         }
       }));
-      
+
       // Clear result after 5 seconds
       setTimeout(() => {
         setTestResults(prev => {
@@ -83,7 +84,7 @@ const ConnectionManager = ({ onClose, onConnectionsChange }) => {
       const res = await fetch(`${API_BASE_URL}/connections/${connection.id}`, {
         method: 'DELETE'
       });
-      
+
       if (res.ok) {
         await fetchConnections();
         setDeleteConfirm({ isOpen: false, connection: null });
@@ -160,10 +161,10 @@ const ConnectionManager = ({ onClose, onConnectionsChange }) => {
 
         <div className="connections-list">
           {connections.length === 0 && (
-            <div style={{ 
-              textAlign: 'center', 
-              padding: '3rem', 
-              color: 'var(--text-tertiary)' 
+            <div style={{
+              textAlign: 'center',
+              padding: '3rem',
+              color: 'var(--text-tertiary)'
             }}>
               <Database size={48} style={{ opacity: 0.3, marginBottom: '1rem' }} />
               <p>No database connections yet.</p>
@@ -187,7 +188,7 @@ const ConnectionManager = ({ onClose, onConnectionsChange }) => {
                   style={{ width: '32px', height: '32px', objectFit: 'contain' }}
                 />
               </div>
-              
+
               <div className="connection-info">
                 <div className="connection-name">{conn.connection_name}</div>
                 <div className="connection-details">
@@ -207,7 +208,7 @@ const ConnectionManager = ({ onClose, onConnectionsChange }) => {
                   User: {conn.username}
                   {conn.ssl_enabled && ' • SSL Enabled'}
                 </div>
-                
+
                 {/* Test Result Status */}
                 {testResults[conn.id] && (
                   <div style={{
@@ -289,13 +290,13 @@ const ConnectionManager = ({ onClose, onConnectionsChange }) => {
               <div className="modal-header">
                 <div className="modal-title">Delete Connection</div>
                 <div className="modal-desc">
-                  Are you sure you want to delete "{deleteConfirm.connection?.connection_name}"? 
+                  Are you sure you want to delete "{deleteConfirm.connection?.connection_name}"?
                   This will also remove all synced tables from this connection.
                 </div>
               </div>
               <div className="modal-actions">
-                <button 
-                  className="btn btn-ghost" 
+                <button
+                  className="btn btn-ghost"
                   onClick={() => setDeleteConfirm({ isOpen: false, connection: null })}
                 >
                   Cancel

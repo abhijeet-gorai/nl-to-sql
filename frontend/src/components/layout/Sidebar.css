@@ -1,0 +1,215 @@
+.sidebar {
+    width: var(--sidebar-width);
+    background: var(--bg-sidebar);
+    border-right: 1px solid var(--border-subtle);
+    display: flex;
+    flex-direction: column;
+    padding: 1.25rem;
+    transition: width 0.3s ease;
+    flex-shrink: 0;
+}
+
+.brand {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding-bottom: 1.5rem;
+    margin-bottom: 1rem;
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.brand-text {
+    font-size: 1.25rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--text-primary);
+}
+
+.section-label {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    font-weight: 600;
+    color: var(--text-tertiary);
+    margin: 1.5rem 0 0.75rem 0;
+    letter-spacing: 0.05em;
+}
+
+/* Upload Button */
+.upload-label {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 0.75rem;
+    background: var(--accent-primary);
+    color: #fff;
+    border-radius: var(--radius-md);
+    font-weight: 500;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    box-shadow: var(--shadow-glow);
+    margin-bottom: 0.5rem;
+}
+
+.upload-label:hover {
+    background: var(--accent-hover);
+    transform: translateY(-1px);
+}
+
+.upload-label:active {
+    transform: translateY(0);
+}
+
+.secondary-button {
+    color: var(--text-primary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    width: 100%;
+    padding: 0.75rem;
+    background: transparent;
+    border-radius: var(--radius-md);
+    font-weight: 500;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border: 1px solid var(--border-subtle);
+    margin-bottom: 0.5rem;
+}
+
+.secondary-button:hover {
+    background: var(--bg-element);
+    transform: translateY(-1px);
+}
+
+.secondary-button:active {
+    transform: translateY(0);
+}
+
+/* Table List */
+.table-list {
+    flex: 1;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    margin-top: 0.5rem;
+}
+
+.nav-item {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.6rem 0.75rem;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    color: var(--text-secondary);
+    border: 1px solid transparent;
+    position: relative;
+    /* margin-right: 0.2rem; removed this as it might not be needed */
+}
+
+.nav-item:hover {
+    background: var(--bg-element);
+    color: var(--text-primary);
+}
+
+.nav-item.active {
+    background: var(--accent-surface);
+    color: var(--accent-primary);
+    border-color: rgba(99, 102, 241, 0.1);
+}
+
+.nav-item .nav-item-actions {
+    opacity: 0;
+    margin-left: auto;
+    transition: opacity 0.2s;
+    display: flex;
+    gap: 4px;
+}
+
+.nav-item:hover .nav-item-actions {
+    opacity: 1;
+}
+
+.nav-item .icon-btn {
+    padding: 4px;
+    color: var(--text-tertiary);
+}
+
+.nav-item .delete-btn:hover {
+    color: #ef4444;
+    background: rgba(239, 68, 68, 0.1);
+}
+
+.nav-item .edit-btn:hover {
+    color: var(--accent-primary);
+    background: var(--accent-surface);
+}
+
+.nav-item-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.nav-item-info {
+    flex: 1;
+    overflow: hidden;
+}
+
+.nav-item-title {
+    font-size: 0.9rem;
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.nav-item-sub {
+    font-size: 0.75rem;
+    opacity: 0.8;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Sidebar Footer */
+.sidebar-footer {
+    margin-top: auto;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border-subtle);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.icon-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-secondary);
+    padding: 0.5rem;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: color 0.2s, background 0.2s;
+}
+
+.icon-btn:hover {
+    background: var(--bg-element);
+    color: var(--text-primary);
+}
+
+.table-group-header {
+    padding: 0.5rem 0;
+    cursor: pointer;
+    border-radius: var(--radius-md);
+    transition: background 0.2s;
+}
+
+.table-group-header:hover {
+    background: var(--bg-element);
+}

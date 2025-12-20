@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { X, Search, Loader, Database, Eye, CheckSquare, Square, Check } from 'lucide-react';
 import CustomSelect from './CustomSelect';
+import './TableBrowser.css';
 
 const API_BASE_URL = 'http://localhost:8000';
 
@@ -24,7 +25,7 @@ const TableBrowser = ({ onClose, onTablesSynced }) => {
     // Prevent double-invocation in development
     if (initialLoadRef.current) return;
     initialLoadRef.current = true;
-    
+
     fetchConnections();
   }, []);
 
@@ -56,7 +57,7 @@ const TableBrowser = ({ onClose, onTablesSynced }) => {
   const handleConnectionSelect = async (connectionId) => {
     const connection = connections.find(c => c.id === connectionId);
     if (!connection) return;
-    
+
     setSelectedConnection(connection);
     setSelectedSchema('');
     setTables([]);
@@ -70,7 +71,7 @@ const TableBrowser = ({ onClose, onTablesSynced }) => {
         fetch(`${API_BASE_URL}/connections/${connection.id}/schemas`),
         fetchSyncedTables(connection.id)
       ]);
-      
+
       if (schemasRes.ok) {
         const data = await schemasRes.json();
         setSchemas(data.schemas || []);
@@ -85,7 +86,7 @@ const TableBrowser = ({ onClose, onTablesSynced }) => {
 
   const handleSchemaSelect = async (schema) => {
     if (!selectedConnection) return;
-    
+
     setSelectedSchema(schema);
     setTables([]);
     setSelectedTables(new Set());
@@ -253,10 +254,10 @@ const TableBrowser = ({ onClose, onTablesSynced }) => {
           <div className="field-group" style={{ flex: 1 }}>
             <label className="field-label">Search Tables</label>
             <div style={{ position: 'relative' }}>
-              <Search size={16} style={{ 
-                position: 'absolute', 
-                left: '0.75rem', 
-                top: '50%', 
+              <Search size={16} style={{
+                position: 'absolute',
+                left: '0.75rem',
+                top: '50%',
                 transform: 'translateY(-50%)',
                 color: 'var(--text-tertiary)'
               }} />
@@ -367,8 +368,8 @@ const TableBrowser = ({ onClose, onTablesSynced }) => {
           <button className="btn btn-ghost" onClick={onClose} disabled={syncing}>
             Cancel
           </button>
-          <button 
-            className="btn btn-primary" 
+          <button
+            className="btn btn-primary"
             onClick={handleSync}
             disabled={selectedTables.size === 0 || syncing}
           >

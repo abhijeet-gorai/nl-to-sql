@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import { Check, ChevronLeft, ChevronRight } from 'lucide-react';
+import './MetadataEditor.css';
 
-const MetadataEditor = ({ 
-  tables, 
-  onSave, 
+const MetadataEditor = ({
+  tables,
+  onSave,
   onCancel,
-  isMultiple = false 
+  isMultiple = false
 }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [editedTables, setEditedTables] = useState(tables);
@@ -73,11 +74,11 @@ const MetadataEditor = ({
               <label className="field-label">
                 {isExternal ? 'Schema Name' : 'Original Filename'}
               </label>
-              <input 
-                className="input-text" 
-                value={isExternal ? currentTable.schema_name : currentTable.original_filename} 
-                disabled 
-                style={{ opacity: 0.6, cursor: 'not-allowed' }} 
+              <input
+                className="input-text"
+                value={isExternal ? currentTable.schema_name : currentTable.original_filename}
+                disabled
+                style={{ opacity: 0.6, cursor: 'not-allowed' }}
               />
             </div>
           </div>
@@ -119,7 +120,7 @@ const MetadataEditor = ({
         <div className="editor-footer">
           {isMultiple && (
             <div style={{ display: 'flex', gap: '0.5rem', marginRight: 'auto' }}>
-              <button 
+              <button
                 className="btn btn-ghost"
                 onClick={handlePrevious}
                 disabled={currentIndex === 0}
@@ -127,7 +128,7 @@ const MetadataEditor = ({
                 <ChevronLeft size={16} />
                 Previous
               </button>
-              <button 
+              <button
                 className="btn btn-ghost"
                 onClick={handleNext}
                 disabled={currentIndex === editedTables.length - 1}

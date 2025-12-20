@@ -1,0 +1,121 @@
+.reasoning-block {
+    margin-top: 1rem;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--bg-app);
+    overflow: hidden;
+}
+
+.reasoning-header {
+    padding: 0.6rem 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    background: var(--bg-element);
+    font-weight: 500;
+    user-select: none;
+    transition: color 0.2s;
+}
+
+.reasoning-header:hover {
+    color: var(--text-primary);
+}
+
+.reasoning-content {
+    padding: 0.5rem;
+    background: var(--bg-panel);
+    border-top: 1px solid var(--border-subtle);
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.step-item {
+    border: 1px solid var(--border-subtle);
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--bg-app);
+}
+
+.step-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.6rem 0.8rem;
+    cursor: pointer;
+    background: rgba(0, 0, 0, 0.02);
+    transition: background 0.2s;
+}
+
+[data-theme='dark'] .step-header {
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.step-header:hover {
+    background: rgba(0, 0, 0, 0.04);
+}
+
+[data-theme='dark'] .step-header:hover {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.step-icon {
+    color: var(--accent-primary);
+    display: flex;
+    align-items: center;
+}
+
+.step-title {
+    font-family: monospace;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.step-details {
+    padding: 1rem;
+    border-top: 1px solid var(--border-subtle);
+    background: var(--bg-panel);
+    font-size: 0.85rem;
+}
+
+.step-label {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    font-weight: 700;
+    color: var(--text-tertiary);
+    margin-bottom: 0.4rem;
+    margin-top: 0.8rem;
+}
+
+.step-label:first-child {
+    margin-top: 0;
+}
+
+.step-code-block {
+    font-family: monospace;
+    background: var(--bg-element);
+    padding: 0.6rem;
+    border-radius: 4px;
+    word-break: break-all;
+    white-space: pre-wrap;
+    border: 1px solid var(--border-subtle);
+    color: var(--text-secondary);
+    max-height: 200px;
+    overflow-y: auto;
+}
+
+.step-row {
+    margin-bottom: 1rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border-subtle);
+}
+
+.step-row:last-child {
+    border: none;
+    padding-bottom: 0;
+    margin-bottom: 0;
+}

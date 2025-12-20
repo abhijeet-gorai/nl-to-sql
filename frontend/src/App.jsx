@@ -1,911 +1,573 @@
 import React, { useState, useEffect, useRef } from 'react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
-import rehypeRaw from 'rehype-raw';
-import {
-  Database, Send, Upload, Sun, Moon,
-  Check, ChevronRight, ChevronDown,
-  Terminal, Play, Cpu, Sparkles, User, Trash2, Pencil, RotateCcw, Link
-} from 'lucide-react';
 import './index.css';
+
+// Components
 import ConnectionManager from './components/ConnectionManager';
 import TableBrowser from './components/TableBrowser';
 import MetadataEditor from './components/MetadataEditor';
+import Sidebar from './components/layout/Sidebar';
+import ChatInterface from './components/chat/ChatInterface';
+import AnalyzingOverlay from './components/common/AnalyzingOverlay';
+import ConfirmationModal from './components/common/ConfirmationModal';
+import EmptyState from './components/common/EmptyState';
 
 const API_BASE_URL = 'http://localhost:8000';
 
 function App() {
-  // --- State ---
-  const [theme, setTheme] = useState('dark');
-  const [view, setView] = useState('empty'); // 'empty', 'edit-metadata', 'chat'
+    // --- State ---
+    const [theme, setTheme] = useState('dark');
+    const [view, setView] = useState('empty'); // 'empty', 'edit-metadata', 'chat'
 
-  const [tables, setTables] = useState([]);
-  const [selectedTableIds, setSelectedTableIds] = useState([]);
-  const [expandedGroups, setExpandedGroups] = useState({ csv: true }); // Track which connection groups are expanded
-  const [expandedSchemas, setExpandedSchemas] = useState({}); // Track which schemas are expanded
+    const [tables, setTables] = useState([]);
 
-  const [stagingMetadata, setStagingMetadata] = useState(null);
-  const [isUploading, setIsUploading] = useState(false);
+    // Changed from selectedTableIds (strings) to selectedTables (objects)
+    const [selectedTables, setSelectedTables] = useState([]);
 
-  const [messages, setMessages] = useState([]);
-  const [input, setInput] = useState('');
-  const [loading, setLoading] = useState(false);
-  
-  // Track expanded state for reasoning accordions and steps
-  const [expandedReasonings, setExpandedReasonings] = useState({});
-  const [expandedSteps, setExpandedSteps] = useState({});
+    const [stagingMetadata, setStagingMetadata] = useState(null);
+    const [isUploading, setIsUploading] = useState(false);
+
+    const [messages, setMessages] = useState([]);
+    const [input, setInput] = useState('');
+    const [loading, setLoading] = useState(false);
+
+    const [threadId, setThreadId] = useState("default");
+
+    // Modal State
+    const [deleteConfirm, setDeleteConfirm] = useState({ isOpen: false, tableName: '' });
+    const [isClearingChat, setIsClearingChat] = useState(false);
+    const [showConnectionManager, setShowConnectionManager] = useState(false);
+    const [showTableBrowser, setShowTableBrowser] = useState(false);
+    const [successModal, setSuccessModal] = useState({ isOpen: false, message: '' });
+    const initialLoadRef = useRef(false);
+
+    // --- Effects ---
+    useEffect(() => {
+        setThreadId(Math.random().toString(36).substring(7));
+    }, []);
+
+    useEffect(() => {
+        document.documentElement.setAttribute('data-theme', theme);
+    }, [theme]);
+
+    useEffect(() => {
+        // Prevent double-invocation in development
+        if (initialLoadRef.current) return;
+        initialLoadRef.current = true;
+
+        fetchTables();
+    }, []);
 
 
-  const messagesEndRef = useRef(null);
-  const [threadId, setThreadId] = useState("default");
+    // --- Actions ---
+    const toggleTheme = () => setTheme(prev => prev === 'dark' ? 'light' : 'dark');
 
-  // Modal State
-  const [deleteConfirm, setDeleteConfirm] = useState({ isOpen: false, tableName: '' });
-  const [isClearingChat, setIsClearingChat] = useState(false);
-  const [showConnectionManager, setShowConnectionManager] = useState(false);
-  const [showTableBrowser, setShowTableBrowser] = useState(false);
-  const [successModal, setSuccessModal] = useState({ isOpen: false, message: '' });
-  const initialLoadRef = useRef(false);
-
-  // --- Effects ---
-  useEffect(() => {
-    setThreadId(Math.random().toString(36).substring(7));
-  }, []);
-
-  useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme);
-  }, [theme]);
-
-  useEffect(() => {
-    // Prevent double-invocation in development
-    if (initialLoadRef.current) return;
-    initialLoadRef.current = true;
-    
-    fetchTables();
-  }, []);
-
-  useEffect(() => {
-    // Only scroll if we are in chat view and messages exist
-    if (view === 'chat') {
-      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [messages, view]);
-
-  // --- Actions ---
-  const toggleTheme = () => setTheme(prev => prev === 'dark' ? 'light' : 'dark');
-
-  const fetchTables = async () => {
-    try {
-      const res = await fetch(`${API_BASE_URL}/tables`);
-      if (res.ok) {
-        const data = await res.json();
-        setTables(data);
-      }
-    } catch (e) {
-      console.error("Failed to fetch tables", e);
-    }
-  };
-
-  const handleFileUpload = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    setIsUploading(true);
-    const formData = new FormData();
-    formData.append('file', file);
-
-    try {
-      // Simulate a small delay for better UX if API is too fast
-      const [res] = await Promise.all([
-        fetch(`${API_BASE_URL}/analyze`, { method: 'POST', body: formData }),
-        new Promise(resolve => setTimeout(resolve, 800))
-      ]);
-
-      if (!res.ok) throw new Error("Analysis failed");
-
-      const data = await res.json();
-
-      setStagingMetadata([{
-        ...data,
-        table_name: data.suggested_table_name,
-        columns: data.columns
-      }]);
-      setView('edit-metadata');
-
-    } catch (err) {
-      console.error(err);
-      alert("Failed to upload/analyze file.");
-    } finally {
-      setIsUploading(false);
-      e.target.value = null; // Reset input
-    }
-  };
-
-  const handleEditTable = (e, table) => {
-    e.stopPropagation();
-    setStagingMetadata([{
-      ...table,
-      isEditing: true
-    }]);
-    setView('edit-metadata');
-  };
-
-  const handleTablesSynced = (syncedTables) => {
-    // Close the browser and show metadata editor
-    setShowTableBrowser(false);
-    setStagingMetadata(syncedTables);
-    setView('edit-metadata');
-  };
-
-  const handleSaveMetadata = async (tables) => {
-    const tablesToSave = Array.isArray(tables) ? tables : [tables];
-    if (tablesToSave.length === 0) return;
-
-    try {
-      const updatedTables = [];
-      const registeredTables = [];
-
-      for (const table of tablesToSave) {
-        // Check if it's an external table (has source_type='external' or schema_name)
-        const isExternalTable = table.source_type !== 'csv';
-        
-        if (table.isEditing || isExternalTable) {
-          // Update existing table OR newly synced external table (both use PUT)
-          const res = await fetch(`${API_BASE_URL}/tables/${table.table_name}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              metadata: {
-                description: table.description,
-                columns: table.columns
-              }
-            })
-          });
-
-          if (!res.ok) {
-            const errorData = await res.json().catch(() => ({}));
-            throw new Error(errorData.detail || "Update failed");
-          }
-          updatedTables.push(table.table_name);
-          
-          // Add newly synced external tables to selected tables
-          if (isExternalTable && !table.isEditing) {
-            setSelectedTableIds(prev => [...prev, table.table_name]);
-          }
-        } else {
-          // Register new CSV table (POST /register)
-          const res = await fetch(`${API_BASE_URL}/register`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              file_path: table.file_path,
-              metadata: {
-                table_name: table.table_name,
-                original_filename: table.original_filename,
-                description: table.description,
-                columns: table.columns
-              }
-            })
-          });
-
-          if (!res.ok) throw new Error("Registration failed");
-          const result = await res.json();
-          setSelectedTableIds(prev => [...prev, result.table_name]);
-          registeredTables.push(table.table_name);
+    const fetchTables = async () => {
+        try {
+            const res = await fetch(`${API_BASE_URL}/tables`);
+            if (res.ok) {
+                const data = await res.json();
+                setTables(data);
+            }
+        } catch (e) {
+            console.error("Failed to fetch tables", e);
         }
-      }
-      
-      await fetchTables();
-      setView('chat');
-      setStagingMetadata(null);
-
-      // Show success modal
-      let message = '';
-      if (updatedTables.length > 0) {
-        message = `Metadata updated successfully for: ${updatedTables.join(', ')}`;
-      } else if (registeredTables.length > 0) {
-        message = `Tables registered successfully: ${registeredTables.join(', ')}`;
-      }
-      setSuccessModal({ isOpen: true, message });
-    } catch (err) {
-      alert(err.message);
-    }
-  };
-
-  const handleDeleteTable = (e, tableName) => {
-    e.stopPropagation();
-    setDeleteConfirm({ isOpen: true, tableName });
-  };
-
-  const proceedWithDelete = async () => {
-    const tableName = deleteConfirm.tableName;
-    if (!tableName) return;
-
-    try {
-      const res = await fetch(`${API_BASE_URL}/tables/${tableName}`, {
-        method: 'DELETE'
-      });
-      if (!res.ok) throw new Error("Failed to delete table");
-
-      await fetchTables();
-      setSelectedTableIds(prev => prev.filter(id => id !== tableName));
-
-      if (selectedTableIds.includes(tableName) && selectedTableIds.length === 1) {
-        setView('empty');
-      }
-      setDeleteConfirm({ isOpen: false, tableName: '' });
-
-    } catch (err) {
-      alert(err.message);
-      setDeleteConfirm({ isOpen: false, tableName: '' });
-    }
-  };
-
-
-
-  const toggleGroup = (groupKey) => {
-    setExpandedGroups(prev => ({
-      ...prev,
-      [groupKey]: !prev[groupKey]
-    }));
-  };
-
-  const toggleSchema = (schemaKey) => {
-    setExpandedSchemas(prev => ({
-      ...prev,
-      [schemaKey]: !prev[schemaKey]
-    }));
-  };
-
-  // Helper function to get database icon
-  const getDbIcon = (dbType) => {
-    const iconMap = {
-      postgresql: '/postgresql.svg',
-      db2: '/ibm-db2.svg',
-      mysql: '/mysql.svg',
-      oracle: '/oracle.svg'
-    };
-    return iconMap[dbType] || '/data-analytics.svg';
-  };
-
-  // Group tables by source with schema hierarchy for external databases
-  const groupedTables = React.useMemo(() => {
-    const groups = {
-      csv: { name: 'Local CSV Files', icon: '📄', isEmoji: true, tables: [] },
     };
 
-    tables.forEach(table => {
-      if (table.source_type === 'csv' || !table.source_type) {
-        groups.csv.tables.push(table);
-      } else {
-        // External database table - group by connection, then by schema
-        const connKey = `ext_${table.connection_id}`;
-        if (!groups[connKey]) {
-          groups[connKey] = {
-            name: table.source_name || 'External Database',
-            icon: getDbIcon(table.db_type),
-            isEmoji: false,
-            connection_id: table.connection_id,
-            schemas: {}
-          };
+    const handleFileUpload = async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        setIsUploading(true);
+        const formData = new FormData();
+        formData.append('file', file);
+
+        try {
+            // Simulate a small delay for better UX if API is too fast
+            const [res] = await Promise.all([
+                fetch(`${API_BASE_URL}/analyze`, { method: 'POST', body: formData }),
+                new Promise(resolve => setTimeout(resolve, 800))
+            ]);
+
+            if (!res.ok) throw new Error("Analysis failed");
+
+            const data = await res.json();
+
+            setStagingMetadata([{
+                ...data,
+                source_type: 'csv',
+                table_name: data.suggested_table_name,
+                columns: data.columns
+            }]);
+            setView('edit-metadata');
+
+        } catch (err) {
+            console.error(err);
+            alert("Failed to upload/analyze file.");
+        } finally {
+            setIsUploading(false);
+            e.target.value = null; // Reset input
         }
-        
-        // Group tables by schema within the connection
-        const schemaName = table.schema_name || 'default';
-        if (!groups[connKey].schemas[schemaName]) {
-          groups[connKey].schemas[schemaName] = {
-            name: schemaName,
-            tables: []
-          };
-        }
-        groups[connKey].schemas[schemaName].tables.push(table);
-      }
-    });
+    };
 
-    // Remove empty groups and convert schemas object to array
-    return Object.entries(groups)
-      .filter(([key, group]) => {
-        if (key === 'csv') return group.tables.length > 0;
-        return Object.keys(group.schemas).length > 0;
-      })
-      .map(([key, group]) => {
-        if (key === 'csv') return [key, group];
-        // Convert schemas object to array for external connections
-        return [key, {
-          ...group,
-          schemas: Object.entries(group.schemas).map(([schemaName, schema]) => ({
-            key: `${key}_${schemaName}`,
-            ...schema
-          }))
-        }];
-      });
-  }, [tables]);
+    const handleEditTable = (e, table) => {
+        e.stopPropagation();
+        setStagingMetadata([{
+            ...table,
+            isEditing: true
+        }]);
+        setView('edit-metadata');
+    };
 
-  const handleTableToggle = (tableName) => {
-    // Ensure the table actually exists in the current `tables` state before toggling
-    const table = tables.find(t => t.table_name === tableName);
-    if (!table) {
-      console.warn(`Attempted to toggle non-existent table: ${tableName}`);
-      return;
-    }
+    const handleTablesSynced = (syncedTables) => {
+        // Close the browser and show metadata editor
+        setShowTableBrowser(false);
+        setStagingMetadata(syncedTables);
+        setView('edit-metadata');
+    };
 
-    setSelectedTableIds(prev => {
-      if (prev.includes(tableName)) {
-        // Deselecting
-        return prev.filter(t => t !== tableName);
-      } else {
-        // Selecting - check if we can add this table
-        if (prev.length === 0) {
-          // First selection, allow
-          return [tableName];
-        }
-        
-        // Check if new table is from same source as existing selections
-        const firstSelectedTable = tables.find(t => t.table_name === prev[0]);
-        const newTableSource = table.source_type === 'csv' ? 'csv' : table.connection_id;
-        const existingSource = firstSelectedTable.source_type === 'csv' ? 'csv' : firstSelectedTable.connection_id;
-        
-        if (newTableSource !== existingSource) {
-          alert('You can only select tables from a single database at a time. Please deselect other tables first.');
-          return prev;
-        }
-        
-        return [...prev, tableName];
-      }
-    });
-    // If we are in empty view and select a table, switch to chat
-    if (view === 'empty') setView('chat');
-  };
+    const handleSaveMetadata = async (tablesToSaveInput) => {
+        const tablesToSave = Array.isArray(tablesToSaveInput) ? tablesToSaveInput : [tablesToSaveInput];
+        if (tablesToSave.length === 0) return;
 
-  const handleSendMessage = async (e) => {
-    e.preventDefault();
-    if (!input.trim() || loading) return;
+        try {
+            const updatedTables = [];
+            const registeredTables = [];
 
-    if (selectedTableIds.length === 0) {
-      alert("Please select at least one table.");
-      return;
-    }
+            for (const table of tablesToSave) {
+                // Check if it's an external table (has source_type='external' or schema_name)
+                const isExternalTable = table.source_type !== 'csv';
 
-    const userMessage = input;
-    setInput('');
-    setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
-    setLoading(true);
+                if (table.isEditing || isExternalTable) {
+                    // Update existing table OR newly synced external table (both use PUT)
+                    let queryParams = '';
 
-    try {
-      setMessages(prev => [...prev, { role: 'ai', content: '', steps: [] }]);
-
-      const response = await fetch(`${API_BASE_URL}/chat`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          message: userMessage,
-          selected_tables: selectedTableIds,
-          thread_id: threadId
-        })
-      });
-
-      if (!response.ok) throw new Error(response.statusText);
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-
-        for (let i = 0; i < lines.length - 1; i++) {
-          const line = lines[i].trim();
-          if (!line) continue;
-
-          try {
-            const data = JSON.parse(line);
-            setMessages(prev => {
-              const newMessages = [...prev];
-              const lastMsgIndex = newMessages.length - 1;
-              const lastMsg = { ...newMessages[lastMsgIndex] };
-
-              if (data.type === 'token') {
-                lastMsg.content = (lastMsg.content || '') + data.content;
-              } else if (data.type === 'tool_start') {
-                if (!lastMsg.steps) lastMsg.steps = [];
-                lastMsg.steps = [...lastMsg.steps, {
-                  tool: data.tool,
-                  input: data.input,
-                  output: 'Running...'
-                }];
-              } else if (data.type === 'tool_end') {
-                if (lastMsg.steps) {
-                  const steps = [...lastMsg.steps];
-                  for (let j = steps.length - 1; j >= 0; j--) {
-                    if (steps[j].tool === data.tool && steps[j].output === 'Running...') {
-                      steps[j] = { ...steps[j], output: data.output };
-                      break;
+                    if (isExternalTable) {
+                        queryParams = `?source_type=external&connection_id=${table.connection_id}`;
+                        if (table.schema_name) {
+                            queryParams += `&schema=${table.schema_name}`;
+                        }
+                    } else {
+                        queryParams = '?source_type=csv';
                     }
-                  }
-                  lastMsg.steps = steps;
+
+                    const res = await fetch(`${API_BASE_URL}/tables/${table.table_name}${queryParams}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            metadata: {
+                                description: table.description,
+                                columns: table.columns
+                            }
+                        })
+                    });
+
+                    if (!res.ok) {
+                        const errorData = await res.json().catch(() => ({}));
+                        throw new Error(errorData.detail || "Update failed");
+                    }
+                    updatedTables.push(table.table_name);
+
+                    // Add newly synced external tables to selected tables
+                    if (isExternalTable && !table.isEditing) {
+                        const newSelection = {
+                            table_name: table.table_name,
+                            source_type: 'external',
+                            connection_id: table.connection_id,
+                            schema_name: table.schema_name
+                        };
+                        // Add if not exists
+                        setSelectedTables(prev => {
+                            const exists = prev.some(t =>
+                                t.table_name === newSelection.table_name &&
+                                t.connection_id === newSelection.connection_id &&
+                                t.schema_name === newSelection.schema_name
+                            );
+                            return exists ? prev : [...prev, newSelection];
+                        });
+                    }
+                } else {
+                    // Register new CSV table (POST /register)
+                    const res = await fetch(`${API_BASE_URL}/register`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            file_path: table.file_path,
+                            metadata: {
+                                table_name: table.table_name,
+                                original_filename: table.original_filename,
+                                description: table.description,
+                                columns: table.columns
+                            }
+                        })
+                    });
+
+                    if (!res.ok) throw new Error("Registration failed");
+                    const result = await res.json();
+
+                    const newSelection = {
+                        table_name: result.table_name,
+                        source_type: 'csv'
+                    };
+                    setSelectedTables(prev => [...prev, newSelection]);
+                    registeredTables.push(table.table_name);
                 }
-              }
-              newMessages[lastMsgIndex] = lastMsg;
-              return newMessages;
-            });
-          } catch (e) { console.error(e); }
+            }
+
+            await fetchTables();
+            setView('chat');
+            setStagingMetadata(null);
+
+            // Show success modal
+            let message = '';
+            if (updatedTables.length > 0) {
+                message = `Metadata updated successfully for: ${updatedTables.join(', ')}`;
+            } else if (registeredTables.length > 0) {
+                message = `Tables registered successfully: ${registeredTables.join(', ')}`;
+            }
+            setSuccessModal({ isOpen: true, message });
+        } catch (err) {
+            alert(err.message);
         }
-        buffer = lines[lines.length - 1];
-      }
-    } catch (err) {
-      setMessages(prev => [...prev, { role: 'error', content: 'Sorry, I encountered an error processing your request.' }]);
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const confirmClearChat = () => {
-    setMessages([]);
-    setThreadId(Math.random().toString(36).substring(7));
-    setExpandedReasonings({});
-    setExpandedSteps({});
-    setIsClearingChat(false);
-  };
-
-  // --- Sub-components ---
-
-  const AnalyzingOverlay = () => (
-    <div className="overlay">
-      <div className="loader-box">
-        <div className="spinner"></div>
-        <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>Analyzing Dataset</div>
-        <div style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>Extracting schema and metadata...</div>
-      </div>
-    </div>
-  );
-
-  // Individual Step Item with persistent state
-  const StepItem = ({ step, messageIdx, stepIdx }) => {
-    const stepKey = `${messageIdx}-${stepIdx}`;
-    const isExpanded = expandedSteps[stepKey] || false;
-
-    const toggleStep = () => {
-      setExpandedSteps(prev => ({
-        ...prev,
-        [stepKey]: !prev[stepKey]
-      }));
     };
 
-    return (
-      <div className="step-item">
-        <div className="step-header" onClick={toggleStep}>
-          <div style={{ transition: 'transform 0.2s', transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)', display: 'flex' }}>
-            <ChevronRight size={14} color="var(--text-tertiary)" />
-          </div>
-          <div className="step-icon">
-            <Terminal size={14} />
-          </div>
-          <span className="step-title">{step.tool}</span>
-        </div>
+    const handleDeleteTable = (e, table) => {
+        e.stopPropagation();
 
-        {isExpanded && (
-          <div className="step-details">
-            <div className="step-label">Input</div>
-            <div className="step-code-block">
-              {typeof step.input === 'object' ? JSON.stringify(step.input, null, 2) : step.input}
-            </div>
+        // table should be the full object passed from Sidebar
+        let tableObj = table;
+        if (typeof table === 'string') {
+            // Fallback lookup if for some reason a string is passed
+            tableObj = tables.find(t => t.table_name === table);
+        }
 
-            <div className="step-label">Result</div>
-            <div className="step-code-block">
-              {step.output}
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  // Main Accordion with persistent state
-  const ReasoningAccordion = ({ steps, messageIdx }) => {
-    const isOpen = expandedReasonings[messageIdx] || false;
-
-    const toggleReasoning = () => {
-      setExpandedReasonings(prev => ({
-        ...prev,
-        [messageIdx]: !prev[messageIdx]
-      }));
+        setDeleteConfirm({
+            isOpen: true,
+            tableName: tableObj.table_name,
+            source_type: tableObj.source_type,
+            connection_id: tableObj.connection_id,
+            schema_name: tableObj.schema_name
+        });
     };
 
+    const proceedWithDelete = async () => {
+        const tableName = deleteConfirm.tableName;
+        if (!tableName) return;
+
+        let targetTable = null;
+        if (Object.keys(deleteConfirm).length > 2) {
+            targetTable = deleteConfirm; // Use stored details
+        } else {
+            targetTable = tables.find(t => t.table_name === tableName);
+        }
+
+        try {
+            let queryParams = '';
+            if (targetTable) {
+                const isExternal = targetTable.source_type !== 'csv';
+                if (isExternal) {
+                    queryParams = `?source_type=external&connection_id=${targetTable.connection_id}`;
+                    if (targetTable.schema_name) {
+                        queryParams += `&schema=${targetTable.schema_name}`;
+                    }
+                } else {
+                    queryParams = '?source_type=csv';
+                }
+            }
+
+            const res = await fetch(`${API_BASE_URL}/tables/${tableName}${queryParams}`, {
+                method: 'DELETE'
+            });
+            if (!res.ok) throw new Error("Failed to delete table");
+
+            await fetchTables();
+            // Remove from selection if deleted
+            setSelectedTables(prev => prev.filter(t => t.table_name !== tableName));
+            // Note: This filter by only table_name might be loose if multiple tables have same name.
+            // But usually user deletes one specific table. 
+            // Correct approach: filter by composite key.
+            setSelectedTables(prev => prev.filter(t => {
+                if (targetTable.source_type === 'csv') {
+                    return !(t.table_name === tableName && t.source_type === 'csv');
+                } else {
+                    return !(t.table_name === tableName && t.connection_id === targetTable.connection_id && t.schema_name === targetTable.schema_name);
+                }
+            }));
+
+            if (selectedTables.length === 1 && selectedTables[0].table_name === tableName) {
+                setView('empty');
+            }
+
+            setDeleteConfirm({ isOpen: false, tableName: '' });
+
+        } catch (err) {
+            alert(err.message);
+            setDeleteConfirm({ isOpen: false, tableName: '' });
+        }
+    };
+
+    const handleTableToggle = (table) => {
+        // If passed a string (legacy/fallback), look it up
+        let tableObj = table;
+        if (typeof table === 'string') {
+            // Trying to find it in 'tables' - might be ambiguous but fallback behavior
+            tableObj = tables.find(t => t.table_name === table);
+            if (!tableObj) return;
+        }
+
+        const newSourceType = tableObj.source_type || 'csv';
+        const newConnId = tableObj.connection_id;
+        const newSchema = tableObj.schema_name;
+
+        setSelectedTables(prev => {
+            // Check if already selected
+            const existingIndex = prev.findIndex(t =>
+                t.table_name === tableObj.table_name &&
+                (t.source_type || 'csv') === newSourceType &&
+                t.connection_id === newConnId &&
+                t.schema_name === newSchema
+            );
+
+            if (existingIndex >= 0) {
+                // Remove
+                const newSel = [...prev];
+                newSel.splice(existingIndex, 1);
+                return newSel;
+            } else {
+                // Add
+                // Check constraint: Single source only
+                if (prev.length > 0) {
+                    const first = prev[0];
+                    const firstSource = (first.source_type || 'csv') === 'csv' ? 'csv' : first.connection_id;
+                    const currentSource = newSourceType === 'csv' ? 'csv' : newConnId;
+
+                    if (firstSource !== currentSource) {
+                        alert('You can only select tables from a single database at a time. Please deselect other tables first.');
+                        return prev;
+                    }
+                }
+
+                // Add structured object
+                return [...prev, {
+                    table_name: tableObj.table_name,
+                    source_type: newSourceType,
+                    connection_id: newConnId,
+                    schema_name: newSchema,
+                    // Keep helpful metadata if needed
+                    db_type: tableObj.db_type
+                }];
+            }
+        });
+
+        if (view === 'empty') setView('chat');
+    };
+
+    const handleSendMessage = async (e) => {
+        e.preventDefault();
+        if (!input.trim() || loading) return;
+
+        if (selectedTables.length === 0) {
+            alert("Please select at least one table.");
+            return;
+        }
+
+        const userMessage = input;
+        setInput('');
+        setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
+        setLoading(true);
+
+        try {
+            setMessages(prev => [...prev, { role: 'ai', content: '', steps: [] }]);
+
+            // Format selected tables for backend
+            // Backend expects: { table_name, source_type, connection_id, schema }
+            const formattedTables = selectedTables.map(t => ({
+                table_name: t.table_name,
+                source_type: t.source_type || 'csv',
+                connection_id: t.connection_id,
+                schema: t.schema_name
+            }));
+
+            const response = await fetch(`${API_BASE_URL}/chat`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    message: userMessage,
+                    selected_tables: formattedTables, // Send full objects
+                    thread_id: threadId
+                })
+            });
+
+            if (!response.ok) throw new Error(response.statusText);
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+
+                for (let i = 0; i < lines.length - 1; i++) {
+                    const line = lines[i].trim();
+                    if (!line) continue;
+
+                    try {
+                        const data = JSON.parse(line);
+                        setMessages(prev => {
+                            const newMessages = [...prev];
+                            const lastMsgIndex = newMessages.length - 1;
+                            const lastMsg = { ...newMessages[lastMsgIndex] };
+
+                            if (data.type === 'token') {
+                                lastMsg.content = (lastMsg.content || '') + data.content;
+                            } else if (data.type === 'tool_start') {
+                                if (!lastMsg.steps) lastMsg.steps = [];
+                                lastMsg.steps = [...lastMsg.steps, {
+                                    tool: data.tool,
+                                    input: data.input,
+                                    output: 'Running...'
+                                }];
+                            } else if (data.type === 'tool_end') {
+                                if (lastMsg.steps) {
+                                    const steps = [...lastMsg.steps];
+                                    for (let j = steps.length - 1; j >= 0; j--) {
+                                        if (steps[j].tool === data.tool && steps[j].output === 'Running...') {
+                                            steps[j] = { ...steps[j], output: data.output };
+                                            break;
+                                        }
+                                    }
+                                    lastMsg.steps = steps;
+                                }
+                            }
+                            newMessages[lastMsgIndex] = lastMsg;
+                            return newMessages;
+                        });
+                    } catch (e) { console.error(e); }
+                }
+                buffer = lines[lines.length - 1];
+            }
+        } catch (err) {
+            setMessages(prev => [...prev, { role: 'error', content: 'Sorry, I encountered an error processing your request.' }]);
+            console.error(err);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const confirmClearChat = () => {
+        setMessages([]);
+        setThreadId(Math.random().toString(36).substring(7));
+        setIsClearingChat(false);
+    };
+
+    // --- Render ---
     return (
-      <div className="reasoning-block">
-        <div className="reasoning-header" onClick={toggleReasoning}>
-          {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-          <span>View Reasoning Process ({steps.length} steps)</span>
-        </div>
-        {isOpen && (
-          <div className="reasoning-content">
-            {steps.map((step, i) => (
-              <StepItem key={i} step={step} messageIdx={messageIdx} stepIdx={i} />
-            ))}
-          </div>
-        )}
-      </div>
-    );
-  };
+        <div className="app-container">
+            {isUploading && <AnalyzingOverlay />}
 
-  // New: Confirmation Modal
-  const ConfirmationModal = ({ isOpen, title, message, onConfirm, onCancel, confirmText = "Confirm", isDanger = false }) => {
-    if (!isOpen) return null;
-    return (
-      <div className="modal-overlay" onClick={onCancel}>
-        <div className="modal-content" onClick={e => e.stopPropagation()}>
-          <div className="modal-header">
-            <div className="modal-title">{title}</div>
-            <div className="modal-desc">{message}</div>
-          </div>
-          <div className="modal-actions">
-            <button className="btn btn-ghost" onClick={onCancel}>Cancel</button>
-            <button className={`btn ${isDanger ? 'btn-danger' : 'btn-primary'}`} onClick={onConfirm}>
-              {confirmText}
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  };
+            <ConfirmationModal
+                isOpen={deleteConfirm.isOpen}
+                title="Delete Dataset"
+                message={`Are you sure you want to permanently delete "${deleteConfirm.tableName}"? This action cannot be undone.`}
+                confirmText="Delete"
+                isDanger={true}
+                onConfirm={proceedWithDelete}
+                onCancel={() => setDeleteConfirm({ isOpen: false, tableName: '' })}
+            />
 
-  // --- Render ---
-  return (
-    <div className="app-container">
-      {isUploading && <AnalyzingOverlay />}
+            <ConfirmationModal
+                isOpen={isClearingChat}
+                title="Clear Chat History"
+                message="Are you sure you want to clear the current conversation? This will start a new session."
+                confirmText="Clear Chat"
+                isDanger={true}
+                onConfirm={confirmClearChat}
+                onCancel={() => setIsClearingChat(false)}
+            />
 
-      <ConfirmationModal
-        isOpen={deleteConfirm.isOpen}
-        title="Delete Dataset"
-        message={`Are you sure you want to permanently delete "${deleteConfirm.tableName}"? This action cannot be undone.`}
-        confirmText="Delete"
-        isDanger={true}
-        onConfirm={proceedWithDelete}
-        onCancel={() => setDeleteConfirm({ isOpen: false, tableName: '' })}
-      />
+            <ConfirmationModal
+                isOpen={successModal.isOpen}
+                title="Success"
+                message={successModal.message}
+                confirmText="OK"
+                isDanger={false}
+                onConfirm={() => setSuccessModal({ isOpen: false, message: '' })}
+                onCancel={() => setSuccessModal({ isOpen: false, message: '' })}
+            />
 
-      <ConfirmationModal
-        isOpen={isClearingChat}
-        title="Clear Chat History"
-        message="Are you sure you want to clear the current conversation? This will start a new session."
-        confirmText="Clear Chat"
-        isDanger={true}
-        onConfirm={confirmClearChat}
-        onCancel={() => setIsClearingChat(false)}
-      />
+            {/* Sidebar */}
+            <Sidebar
+                tables={tables}
+                selectedTables={selectedTables} // Passed as selectedTables (objects)
+                onUpload={handleFileUpload}
+                onConnect={() => setShowConnectionManager(true)}
+                onBrowse={() => setShowTableBrowser(true)}
+                onToggleTable={handleTableToggle}
+                onEditTable={handleEditTable}
+                onDeleteTable={handleDeleteTable}
+                toggleTheme={toggleTheme}
+                theme={theme}
+            />
 
-      <ConfirmationModal
-        isOpen={successModal.isOpen}
-        title="Success"
-        message={successModal.message}
-        confirmText="OK"
-        isDanger={false}
-        onConfirm={() => setSuccessModal({ isOpen: false, message: '' })}
-        onCancel={() => setSuccessModal({ isOpen: false, message: '' })}
-      />
+            {/* Main Content */}
+            <main className="main-content">
 
-      {/* Sidebar */}
-      <aside className="sidebar">
-        <div className="brand">
-          <Database size={24} color="var(--accent-primary)" />
-          <span className="brand-text">DataTalk</span>
-        </div>
+                {/* VIEW: Metadata Editor */}
+                {view === 'edit-metadata' && stagingMetadata && (
+                    <MetadataEditor
+                        tables={stagingMetadata}
+                        onSave={handleSaveMetadata}
+                        onCancel={() => {
+                            setStagingMetadata(null);
+                            setView(tables.length > 0 ? 'chat' : 'empty');
+                        }}
+                        isMultiple={Array.isArray(stagingMetadata) && stagingMetadata.length > 1}
+                    />
+                )}
 
-        <label className="upload-label">
-          <Upload size={16} />
-          <span>Import CSV</span>
-          <input type="file" hidden accept=".csv" onChange={handleFileUpload} />
-        </label>
+                {/* VIEW: Chat */}
+                {view === 'chat' && (
+                    <ChatInterface
+                        messages={messages}
+                        input={input}
+                        setInput={setInput}
+                        handleSendMessage={handleSendMessage}
+                        loading={loading}
+                        selectedTables={selectedTables} // Passed as selectedTables
+                        onClearChat={() => setIsClearingChat(true)}
+                    />
+                )}
 
-        <button
-          className="secondary-button"
-          onClick={() => setShowConnectionManager(true)}
-        >
-          <Link size={16} />
-          <span>Connections</span>
-        </button>
+                {/* VIEW: Empty */}
+                {view === 'empty' && (
+                    <EmptyState />
+                )}
 
-        <button
-          className="secondary-button"
-          onClick={() => setShowTableBrowser(true)}
-        >
-          <Database size={16} />
-          <span>Browse Tables</span>
-        </button>
+            </main>
 
-        <div className="section-label">Datasets</div>
-        <div className="table-list">
-          {tables.length === 0 && (
-            <div style={{ padding: '0 0.5rem', color: 'var(--text-tertiary)', fontSize: '0.85rem' }}>
-              No data loaded yet.
-            </div>
-          )}
-          
-          {groupedTables.map(([groupKey, group]) => (
-            <div key={groupKey} className="table-group">
-              {/* Connection Level */}
-              <div
-                className="table-group-header"
-                onClick={() => toggleGroup(groupKey)}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  {expandedGroups[groupKey] ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                  {group.isEmoji ? (
-                    <span style={{ fontSize: '1.2rem' }}>{group.icon}</span>
-                  ) : (
-                    <img src={group.icon} alt={group.name} style={{ width: '20px', height: '20px' }} />
-                  )}
-                  <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>{group.name}</span>
-                  <span style={{
-                    fontSize: '0.75rem',
-                    color: 'var(--text-tertiary)',
-                    marginLeft: '0.25rem'
-                  }}>
-                    {groupKey === 'csv' ? `(${group.tables.length})` : `(${group.schemas.length} schemas)`}
-                  </span>
-                </div>
-              </div>
-              
-              {expandedGroups[groupKey] && (
-                <>
-                  {/* CSV Files - Direct table list */}
-                  {groupKey === 'csv' && group.tables.map(table => (
-                    <div
-                      key={table.id}
-                      className={`nav-item ${selectedTableIds.includes(table.table_name) ? 'active' : ''}`}
-                      onClick={() => handleTableToggle(table.table_name)}
-                      style={{ marginLeft: '1rem' }}
-                    >
-                      <div className="nav-item-icon">
-                        {selectedTableIds.includes(table.table_name) ? <Check size={16} /> : <Database size={16} />}
-                      </div>
-                      <div className="nav-item-info">
-                        <div className="nav-item-title">{table.table_name}</div>
-                        <div className="nav-item-sub">{table.description || "No description"}</div>
-                      </div>
-                      <div className="nav-item-actions" style={{ marginLeft: 'auto', display: 'flex', gap: '0.25rem' }}>
-                        <button
-                          className="icon-btn edit-btn"
-                          onClick={(e) => handleEditTable(e, table)}
-                          title="Edit Metadata"
-                        >
-                          <Pencil size={14} />
-                        </button>
-                        <button
-                          className="icon-btn delete-btn"
-                          onClick={(e) => handleDeleteTable(e, table.table_name)}
-                          title="Delete Table"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                  
-                  {/* External Databases - Schema → Tables hierarchy */}
-                  {groupKey !== 'csv' && group.schemas.map(schema => (
-                    <div key={schema.key} style={{ marginLeft: '1rem' }}>
-                      {/* Schema Level */}
-                      <div
-                        className="table-group-header"
-                        onClick={() => toggleSchema(schema.key)}
-                        style={{ padding: '0.5rem 0.75rem' }}
-                      >
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                          {expandedSchemas[schema.key] ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                          <span style={{ fontWeight: 500, fontSize: '0.85rem' }}>{schema.name}</span>
-                          <span style={{
-                            fontSize: '0.7rem',
-                            color: 'var(--text-tertiary)',
-                            marginLeft: '0.25rem'
-                          }}>
-                            ({schema.tables.length})
-                          </span>
-                        </div>
-                      </div>
-                      
-                      {/* Tables in Schema */}
-                      {expandedSchemas[schema.key] && schema.tables.map(table => (
-                        <div
-                          key={table.id}
-                          className={`nav-item ${selectedTableIds.includes(table.table_name) ? 'active' : ''}`}
-                          onClick={() => handleTableToggle(table.table_name)}
-                          style={{ marginLeft: '1rem' }}
-                        >
-                          <div className="nav-item-icon">
-                            {selectedTableIds.includes(table.table_name) ? <Check size={16} /> : <Database size={16} />}
-                          </div>
-                          <div className="nav-item-info">
-                            <div className="nav-item-title">{table.table_name}</div>
-                            <div className="nav-item-sub">{table.description || "No description"}</div>
-                          </div>
-                          <div className="nav-item-actions" style={{ marginLeft: 'auto', display: 'flex', gap: '0.25rem' }}>
-                            <button
-                              className="icon-btn edit-btn"
-                              onClick={(e) => handleEditTable(e, table)}
-                              title="Edit Metadata"
-                            >
-                              <Pencil size={14} />
-                            </button>
-                            <button
-                              className="icon-btn delete-btn"
-                              onClick={(e) => handleDeleteTable(e, table.table_name)}
-                              title="Delete Table"
-                            >
-                              <Trash2 size={14} />
-                            </button>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  ))}
-                </>
-              )}
-            </div>
-          ))}
-        </div>
-
-        <div className="sidebar-footer">
-          <div style={{ fontSize: '0.8rem', color: 'var(--text-tertiary)' }}>
-            v1.0.0
-          </div>
-          <button className="icon-btn" onClick={toggleTheme} title="Toggle Theme">
-            {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}
-          </button>
-        </div>
-      </aside>
-
-      {/* Main Content */}
-      <main className="main-content">
-
-        {/* VIEW: Metadata Editor */}
-        {view === 'edit-metadata' && stagingMetadata && (
-          <MetadataEditor
-            tables={stagingMetadata}
-            onSave={handleSaveMetadata}
-            onCancel={() => {
-              setStagingMetadata(null);
-              setView(tables.length > 0 ? 'chat' : 'empty');
-            }}
-            isMultiple={Array.isArray(stagingMetadata) && stagingMetadata.length > 1}
-          />
-        )}
-
-        {/* VIEW: Chat */}
-        {view === 'chat' && (
-          <div className="chat-wrapper">
-            <div className="chat-header">
-              <div className="chat-title">
-                <Sparkles size={18} color="var(--accent-primary)" />
-                <span>Data Assistant</span>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                <div className="chat-badge">
-                  {selectedTableIds.length} Contexts Active
-                </div>
-                <button
-                  className="icon-btn"
-                  onClick={() => setIsClearingChat(true)}
-                  title="Clear Chat"
-                  disabled={messages.length === 0}
-                  style={{ opacity: messages.length === 0 ? 0.5 : 1 }}
-                >
-                  <RotateCcw size={18} />
-                </button>
-              </div>
-            </div>
-
-            <div className="chat-area">
-              {messages.length === 0 && (
-                <div className="empty-state">
-                  <div className="empty-icon"><Database size={32} /></div>
-                  <h3 style={{ fontSize: '1.25rem', fontWeight: 600, marginBottom: '0.5rem' }}>Ready to Analyze</h3>
-                  <p style={{ maxWidth: 400 }}>Ask questions about your selected datasets. I can run SQL queries and visualize data for you.</p>
-                </div>
-              )}
-
-              {messages.map((msg, idx) => {
-                // Check if this is an AI message that hasn't received content yet
-                const isThinking = msg.role === 'ai' && !msg.content && (!msg.steps || msg.steps.length === 0);
-
-                return (
-                  <div key={idx} className="message">
-                    <div className={`avatar ${msg.role}`}>
-                      {msg.role === 'user' ? <User size={20} /> : <Cpu size={20} />}
-                    </div>
-                    <div className="msg-body">
-                      <div className="msg-role-name">{msg.role === 'user' ? 'You' : 'Assistant'}</div>
-
-                      {isThinking ? (
-                        <div className="typing-indicator">
-                          <span></span><span></span><span></span>
-                        </div>
-                      ) : (
-                        <>
-                          <div className="msg-content">
-                            <ReactMarkdown 
-                              remarkPlugins={[remarkGfm]}
-                              rehypePlugins={[rehypeRaw]}
-                              components={{
-                                table: ({...props}) => (
-                                  <div className="table-wrapper">
-                                    <table {...props} />
-                                  </div>
-                                )
-                              }}
-                            >
-                              {msg.content}
-                            </ReactMarkdown>
-                          </div>
-                          {msg.steps && msg.steps.length > 0 && (
-                            <ReasoningAccordion steps={msg.steps} messageIdx={idx} />
-                          )}
-                        </>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-              <div ref={messagesEndRef} />
-            </div>
-
-            <div className="input-wrapper">
-              <form className="input-container" onSubmit={handleSendMessage}>
-                <input
-                  className="chat-input"
-                  placeholder="Ask a question about your data..."
-                  value={input}
-                  onChange={e => setInput(e.target.value)}
-                  disabled={loading}
+            {/* Connection Manager Modal */}
+            {showConnectionManager && (
+                <ConnectionManager
+                    onClose={() => setShowConnectionManager(false)}
+                    onConnectionsChange={() => {
+                        // Optionally refresh tables when connections change
+                        fetchTables();
+                    }}
                 />
-                <button className="send-button" disabled={loading || !input.trim()}>
-                  <Send size={18} />
-                </button>
-              </form>
-            </div>
-          </div>
-        )}
+            )}
 
-        {/* VIEW: Empty */}
-        {view === 'empty' && (
-          <div className="empty-state">
-            <div className="empty-icon"><Database size={32} /></div>
-            <h2 style={{ fontSize: '1.5rem', fontWeight: 700, marginBottom: '1rem' }}>Welcome to DataTalk</h2>
-            <p style={{ maxWidth: 500, lineHeight: 1.6 }}>
-              Upload a CSV file using the button in the sidebar to get started.
-              <br />
-              Once uploaded, you can select it to begin a conversation.
-            </p>
-          </div>
-        )}
-
-      </main>
-
-      {/* Connection Manager Modal */}
-      {showConnectionManager && (
-        <ConnectionManager
-          onClose={() => setShowConnectionManager(false)}
-          onConnectionsChange={() => {
-            // Optionally refresh tables when connections change
-            fetchTables();
-          }}
-        />
-      )}
-
-      {/* Table Browser Modal */}
-      {showTableBrowser && (
-        <TableBrowser
-          onClose={() => setShowTableBrowser(false)}
-          onTablesSynced={handleTablesSynced}
-        />
-      )}
-    </div>
-  );
+            {/* Table Browser Modal */}
+            {showTableBrowser && (
+                <TableBrowser
+                    onClose={() => setShowTableBrowser(false)}
+                    onTablesSynced={handleTablesSynced}
+                />
+            )}
+        </div>
+    );
 }
 
 export default App;

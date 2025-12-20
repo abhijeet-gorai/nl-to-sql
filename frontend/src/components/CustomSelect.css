@@ -1,0 +1,103 @@
+/* Custom Select Component */
+.custom-select-wrapper {
+    position: relative;
+    width: 100%;
+}
+
+.custom-select {
+    position: relative;
+    cursor: pointer;
+    user-select: none;
+}
+
+.custom-select.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.custom-select-trigger {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.625rem 0.875rem;
+    background: var(--bg-element);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    transition: all 0.2s;
+    min-height: 42px;
+}
+
+.custom-select-trigger:hover:not(.disabled) {
+    border-color: var(--accent-primary);
+    background: var(--bg-panel);
+}
+
+.custom-select.open .custom-select-trigger {
+    border-color: var(--accent-primary);
+    box-shadow: 0 0 0 3px var(--accent-surface);
+}
+
+.custom-select-trigger .placeholder {
+    color: var(--text-tertiary);
+}
+
+.custom-select-trigger .chevron {
+    color: var(--text-secondary);
+    transition: transform 0.2s;
+    flex-shrink: 0;
+}
+
+.custom-select-trigger .chevron.rotated {
+    transform: rotate(180deg);
+}
+
+.custom-select-dropdown {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    background: var(--bg-panel);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+    max-height: 250px;
+    overflow-y: auto;
+    z-index: 1000;
+    animation: slideDown 0.15s ease;
+}
+
+.custom-select-option {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.625rem 0.875rem;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+
+.custom-select-option:hover:not(.disabled) {
+    background: var(--bg-element);
+}
+
+.custom-select-option.selected {
+    background: var(--accent-surface);
+    color: var(--accent-primary);
+    font-weight: 500;
+}
+
+.custom-select-option.disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+@keyframes slideDown {
+    from {
+        opacity: 0;
+        transform: translateY(-8px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}

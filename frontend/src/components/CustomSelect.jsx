@@ -1,13 +1,14 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ChevronDown, Check } from 'lucide-react';
+import './CustomSelect.css';
 
-const CustomSelect = ({ 
-  options = [], 
-  value, 
-  onChange, 
-  placeholder = 'Select...', 
+const CustomSelect = ({
+  options = [],
+  value,
+  onChange,
+  placeholder = 'Select...',
   disabled = false,
-  label = null 
+  label = null
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const selectRef = useRef(null);
@@ -33,7 +34,7 @@ const CustomSelect = ({
   return (
     <div className="custom-select-wrapper" ref={selectRef}>
       {label && <label className="field-label">{label}</label>}
-      <div 
+      <div
         className={`custom-select ${isOpen ? 'open' : ''} ${disabled ? 'disabled' : ''}`}
         onClick={() => !disabled && setIsOpen(!isOpen)}
       >
@@ -43,7 +44,7 @@ const CustomSelect = ({
           </span>
           <ChevronDown size={16} className={`chevron ${isOpen ? 'rotated' : ''}`} />
         </div>
-        
+
         {isOpen && !disabled && (
           <div className="custom-select-dropdown">
             {options.length === 0 ? (
