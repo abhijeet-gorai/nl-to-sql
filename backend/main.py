@@ -46,9 +46,16 @@ async def startup_event():
     cm.init_connections_table()
 
 
+class TableSelection(BaseModel):
+    table_name: str
+    source_type: str = "csv"  # 'csv' or 'external'
+    connection_id: Optional[int] = None
+    schema: Optional[str] = None
+
+
 class ChatRequest(BaseModel):
     message: str
-    selected_tables: List[str] = []
+    selected_tables: List[TableSelection] = []
     thread_id: str = "default"
 
 
