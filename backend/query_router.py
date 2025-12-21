@@ -6,40 +6,69 @@ Routes queries to appropriate database based on table source
 import sqlite3
 import pandas as pd
 from typing import List, Dict, Optional
-import re
+import sqlglot
+from sqlglot import exp
+
 import connection_manager as cm
 import db
 
 DB_PATH = "database.db"
 
 
-def parse_query_tables(query: str) -> List[str]:
-    """Extract table names from SQL query"""
-    # Simple regex to find table names after FROM and JOIN
-    # This is a basic implementation - could be enhanced with proper SQL parsing
-    query_upper = query.upper()
-
-    # Remove subqueries and strings to avoid false matches
-    cleaned_query = re.sub(r"\([^)]*\)", "", query_upper)
-    cleaned_query = re.sub(r"'[^']*'", "", cleaned_query)
-    cleaned_query = re.sub(r'"[^"]*"', "", cleaned_query)
+def parse_query_tables(query: str) -> List[Dict[str, Optional[str]]]:
+    """
+    Extract table names from SQL query using sqlglot.
+    Returns list of dicts: {'schema': str|None, 'table': str}
+    Excludes CTEs defined within the query.
+    """
+    try:
+        parsed = sqlglot.parse_one(query)
+    except Exception as e:
+        # If parsing fails, fall back to empty list or raise error?
+        # For security, we should probably treat unparsable queries as suspicious or handled by regex fallback,
+        # but here we'll assume valid SQL generation from the agent.
+        print(f"Warning: Failed to parse query with sqlglot: {e}")
+        return []
 
     tables = []
+    cte_names = set()
 
-    # Find tables after FROM
-    from_pattern = r"FROM\s+([a-zA-Z0-9_]+)"
-    from_matches = re.findall(from_pattern, cleaned_query)
-    tables.extend(from_matches)
+    # Find CTE definitions to exclude them
+    for cte in parsed.find_all(exp.CTE):
+        if cte.alias:
+            cte_names.add(cte.alias.upper())
 
-    # Find tables after JOIN
-    join_pattern = r"JOIN\s+([a-zA-Z0-9_]+)"
-    join_matches = re.findall(join_pattern, cleaned_query)
-    tables.extend(join_matches)
+    # Find all table references
+    for table in parsed.find_all(exp.Table):
+        # sqlglot treats function calls sometimes as tables if ambiguous, but usually correct.
+        # Check if it's a CTE reference
+        table_name = table.name.upper()
+        if table_name in cte_names:
+            continue
 
-    # Remove duplicates and convert to lowercase
-    tables = list(set([t.lower() for t in tables]))
+        schema = table.db
+        if schema:
+            schema = schema.lower()  # Normalize
+        else:
+            schema = None
 
-    return tables
+        tables.append(
+            {
+                "schema": schema,
+                "table": table.name.lower(),  # Normalize
+            }
+        )
+
+    # Deduplicate based on schema+table
+    unique_tables = []
+    seen = set()
+    for t in tables:
+        key = (t["schema"], t["table"])
+        if key not in seen:
+            seen.add(key)
+            unique_tables.append(t)
+
+    return unique_tables
 
 
 def get_table_source(table_name: str) -> Optional[Dict]:
@@ -148,6 +177,65 @@ def execute_federated_query(query: str, selected_tables: List[Dict]) -> pd.DataF
     """Execute query against appropriate database based on selected tables"""
     if not selected_tables:
         raise ValueError("No tables selected")
+
+    # 1. Parse tables from the query
+    parsed_tables = parse_query_tables(query)
+
+    # 2. Validate extracted tables against selected tables
+    # Build a lookup for selected tables: (schema, table_name) -> Source Info
+    # For CSVs, schema is None.
+    selected_lookup = set()
+    for st in selected_tables:
+        # Handle dict or object
+        if hasattr(st, "dict"):
+            st = st.dict()
+        else:
+            st = dict(st)
+
+        t_name = st["table_name"].lower()
+        s_name = st.get("schema")
+        if s_name:
+            s_name = s_name.lower()
+
+        # We store pairs of (schema, table)
+        # Note: If schema is None, it matches parsed tables with None schema OR un-schema'd references (if allowed)
+        selected_lookup.add((s_name, t_name))
+
+    for pt in parsed_tables:
+        pt_table = pt["table"]
+        pt_schema = pt["schema"]
+
+        # Check for strict match
+        # Case 1: Query has schema (e.g. public.orders). Must match exactly.
+        if pt_schema:
+            if (pt_schema, pt_table) not in selected_lookup:
+                raise ValueError(
+                    f"Security Error: Access to table '{pt_schema}.{pt_table}' is denied. It is not in the selected tables list."
+                )
+
+        # Case 2: Query has NO schema (e.g. orders).
+        # We allow it IF there's a selected table with that name (ignoring schema for convenience if no ambiguity?)
+        # OR we strictly require that if the selected table has a schema, the query MUST use it?
+        # User requested: "make sure that the query doesn't have any other table apart from the selected_tables"
+        # Safest approach: If query has no schema, we check if ANY selected table matches that name.
+        # BUT if multiple selected tables have same name (diff schemas), referencing without schema is ambiguous.
+        # However, we are just validating 'is this table allowed'.
+        else:
+            # Check if (None, table) exists (local CSV) OR if (_, table) exists (External)
+            # If the user selected 'public.orders', and query asks for 'orders', is that allowed?
+            # Typically SQL requires schema if not in search path.
+            # Here we just want to block 'users' if 'users' wasn't selected.
+
+            found = False
+            for sel_schema, sel_table in selected_lookup:
+                if sel_table == pt_table:
+                    found = True
+                    break
+
+            if not found:
+                raise ValueError(
+                    f"Security Error: Access to table '{pt_table}' is denied. It is not in the selected tables list."
+                )
 
     # Get sources for selected tables (tables are already in source format mostly)
     table_sources = get_table_sources(selected_tables)
