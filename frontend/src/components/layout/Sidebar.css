@@ -250,3 +250,24 @@
         transform: scale(1);
     }
 }
+
+/* Mobile Styles */
+.mobile-close-btn {
+    display: none;
+    margin-left: auto;
+}
+
+@media (max-width: 768px) {
+    .sidebar {
+        width: 280px;
+        /* Slightly narrower on mobile */
+    }
+
+    .mobile-close-btn {
+        display: flex;
+    }
+
+    .brand {
+        justify-content: space-between;
+    }
+}

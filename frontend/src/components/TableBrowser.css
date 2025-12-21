@@ -164,7 +164,18 @@
 
     .table-browser-modal,
     .preview-modal {
-        width: 95%;
-        max-height: 90vh;
+        width: 100% !important;
+        height: 100% !important;
+        max-height: 100vh !important;
+        border-radius: 0;
+    }
+
+    .browser-controls {
+        flex-direction: column;
+        gap: 0.75rem;
+    }
+
+    .browser-controls .field-group {
+        width: 100%;
     }
 }

@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import {
     Database, Upload, Link, Sun, Moon,
     ChevronRight, ChevronDown, Check, Pencil, Trash2,
-    CheckSquare, Square, MinusSquare
+    CheckSquare, Square, MinusSquare, X
 } from 'lucide-react';
 import './Sidebar.css';
 
@@ -17,7 +17,9 @@ const Sidebar = ({
     onDeleteTable,
     onToggleGroup,
     toggleTheme,
-    theme
+    theme,
+    isOpen,    // New prop
+    onClose    // New prop
 }) => {
     const [expandedGroups, setExpandedGroups] = useState({ csv: true });
     const [expandedSchemas, setExpandedSchemas] = useState({});
@@ -101,10 +103,16 @@ const Sidebar = ({
     }, [tables]);
 
     return (
-        <aside className="sidebar">
+        <aside className={`sidebar ${isOpen ? 'mobile-open' : ''}`}>
             <div className="brand">
-                <Database size={24} color="var(--accent-primary)" />
-                <span className="brand-text">DataTalk</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    <Database size={24} color="var(--accent-primary)" />
+                    <span className="brand-text">DataTalk</span>
+                </div>
+                {/* Mobile Close Button */}
+                <button className="icon-btn mobile-close-btn" onClick={onClose}>
+                    <X size={20} />
+                </button>
             </div>
 
             <label className="upload-label">

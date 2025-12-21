@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { Menu } from 'lucide-react';
 import './index.css';
 
 // Components
@@ -37,7 +38,12 @@ function App() {
     const [isClearingChat, setIsClearingChat] = useState(false);
     const [showConnectionManager, setShowConnectionManager] = useState(false);
     const [showTableBrowser, setShowTableBrowser] = useState(false);
+
     const [successModal, setSuccessModal] = useState({ isOpen: false, message: '' });
+
+    // Mobile Responsive State
+    const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
+
     const initialLoadRef = useRef(false);
 
     // --- Effects ---
@@ -566,6 +572,13 @@ function App() {
             />
 
             {/* Sidebar */}
+            {isMobileSidebarOpen && (
+                <div
+                    className="mobile-sidebar-overlay"
+                    onClick={() => setIsMobileSidebarOpen(false)}
+                />
+            )}
+
             <Sidebar
                 tables={tables}
                 selectedTables={selectedTables} // Passed as selectedTables (objects)
@@ -578,10 +591,22 @@ function App() {
                 onDeleteTable={handleDeleteTable}
                 toggleTheme={toggleTheme}
                 theme={theme}
+                isOpen={isMobileSidebarOpen}
+                onClose={() => setIsMobileSidebarOpen(false)}
             />
 
             {/* Main Content */}
             <main className="main-content">
+                {/* Mobile Header with Menu Button */}
+                <div className="mobile-header">
+                    <button
+                        className="icon-btn"
+                        onClick={() => setIsMobileSidebarOpen(true)}
+                    >
+                        <Menu size={24} />
+                    </button>
+                    <span className="brand-text-mobile">DataTalk</span>
+                </div>
 
                 {/* VIEW: Metadata Editor */}
                 {view === 'edit-metadata' && stagingMetadata && (

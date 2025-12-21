@@ -38,6 +38,30 @@
     margin-bottom: 1.5rem;
 }
 
+@media (max-width: 768px) {
+    .editor-wrapper {
+        padding: 1rem;
+    }
+
+    .editor-body {
+        padding: 1.25rem;
+    }
+
+    .editor-row {
+        grid-template-columns: 1fr;
+        gap: 1rem;
+    }
+
+    .column-row {
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+
+    .col-meta {
+        width: 100%;
+    }
+}
+
 .field-group {
     display: flex;
     flex-direction: column;

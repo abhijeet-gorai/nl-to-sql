@@ -272,3 +272,61 @@ img {
     transform: translateY(0);
   }
 }
+
+/* --- Mobile Responsiveness --- */
+.mobile-header {
+  display: none;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem;
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-panel);
+}
+
+.brand-text-mobile {
+  font-weight: 700;
+  font-size: 1.1rem;
+  letter-spacing: -0.02em;
+}
+
+.mobile-sidebar-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(2px);
+  z-index: 99;
+  animation: fadeIn 0.2s ease;
+}
+
+@media (max-width: 768px) {
+  .app-container {
+    flex-direction: column;
+  }
+
+  .sidebar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    z-index: 100;
+    transform: translateX(-100%);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    box-shadow: var(--shadow-md);
+  }
+
+  .sidebar.mobile-open {
+    transform: translateX(0);
+    width: 300px;
+    /* Force width on mobile */
+  }
+
+  .main-content {
+    width: 100%;
+    margin-left: 0 !important;
+    /* Override any desktop margins */
+  }
+
+  .mobile-header {
+    display: flex;
+  }
+}

@@ -42,6 +42,22 @@
     scroll-behavior: smooth;
 }
 
+@media (max-width: 768px) {
+    .chat-area {
+        padding: 1rem;
+        gap: 1rem;
+    }
+
+    .chat-header {
+        padding: 0.75rem 1rem;
+        height: 50px;
+    }
+
+    .input-wrapper {
+        padding: 1rem;
+    }
+}
+
 /* Messages */
 .message {
     display: flex;
