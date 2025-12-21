@@ -361,6 +361,73 @@ function App() {
         if (view === 'empty') setView('chat');
     };
 
+    const handleGroupToggle = (groupTables) => {
+        if (!groupTables || groupTables.length === 0) return;
+
+        // Determine target source from the first table in the group
+        const targetSourceType = groupTables[0].source_type || 'csv';
+        const targetConnId = groupTables[0].connection_id;
+
+        // Check if ANY table in this group is NOT selected -> Select All
+        // If ALL tables are selected -> Deselect All
+        const allSelected = groupTables.every(table =>
+            selectedTables.some(t =>
+                t.table_name === table.table_name &&
+                (t.source_type || 'csv') === (table.source_type || 'csv') &&
+                t.connection_id === table.connection_id &&
+                t.schema_name === table.schema_name
+            )
+        );
+
+        setSelectedTables(prev => {
+            if (allSelected) {
+                // Deselect only tables in this group
+                return prev.filter(t => !groupTables.some(gt =>
+                    gt.table_name === t.table_name &&
+                    (gt.source_type || 'csv') === (t.source_type || 'csv') &&
+                    gt.connection_id === t.connection_id &&
+                    gt.schema_name === t.schema_name
+                ));
+            } else {
+                // Select All (Add missing ones)
+                // First check source constraint
+                if (prev.length > 0) {
+                    const first = prev[0];
+                    const firstSource = (first.source_type || 'csv') === 'csv' ? 'csv' : first.connection_id;
+                    const currentSource = targetSourceType === 'csv' ? 'csv' : targetConnId;
+
+                    if (firstSource !== currentSource) {
+                        alert('You can only select tables from a single database at a time. Please deselect other tables first.');
+                        return prev;
+                    }
+                }
+
+                const newSelection = [...prev];
+                groupTables.forEach(table => {
+                    const exists = newSelection.some(t =>
+                        t.table_name === table.table_name &&
+                        (t.source_type || 'csv') === (table.source_type || 'csv') &&
+                        t.connection_id === table.connection_id &&
+                        t.schema_name === table.schema_name
+                    );
+
+                    if (!exists) {
+                        newSelection.push({
+                            table_name: table.table_name,
+                            source_type: table.source_type || 'csv',
+                            connection_id: table.connection_id,
+                            schema_name: table.schema_name,
+                            db_type: table.db_type
+                        });
+                    }
+                });
+                return newSelection;
+            }
+        });
+
+        if (view === 'empty') setView('chat');
+    };
+
     const handleSendMessage = async (e) => {
         e.preventDefault();
         if (!input.trim() || loading) return;
@@ -506,6 +573,7 @@ function App() {
                 onConnect={() => setShowConnectionManager(true)}
                 onBrowse={() => setShowTableBrowser(true)}
                 onToggleTable={handleTableToggle}
+                onToggleGroup={handleGroupToggle}
                 onEditTable={handleEditTable}
                 onDeleteTable={handleDeleteTable}
                 toggleTheme={toggleTheme}

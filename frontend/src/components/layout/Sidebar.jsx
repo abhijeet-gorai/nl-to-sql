@@ -1,7 +1,8 @@
 import React, { useState, useMemo } from 'react';
 import {
     Database, Upload, Link, Sun, Moon,
-    ChevronRight, ChevronDown, Check, Pencil, Trash2
+    ChevronRight, ChevronDown, Check, Pencil, Trash2,
+    CheckSquare, Square, MinusSquare
 } from 'lucide-react';
 import './Sidebar.css';
 
@@ -14,6 +15,7 @@ const Sidebar = ({
     onToggleTable,
     onEditTable,
     onDeleteTable,
+    onToggleGroup,
     toggleTheme,
     theme
 }) => {
@@ -144,14 +146,71 @@ const Sidebar = ({
                             className="table-group-header"
                             onClick={() => toggleGroup(groupKey)}
                         >
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', width: '100%' }}>
                                 {expandedGroups[groupKey] ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+
+                                <div
+                                    className="table-checkbox"
+                                    onClick={(e) => {
+                                        e.stopPropagation();
+                                        // Collect all tables in this group (including all schemas for external)
+                                        let allTables = [];
+                                        if (groupKey === 'csv') {
+                                            allTables = group.tables;
+                                        } else {
+                                            group.schemas.forEach(schema => {
+                                                allTables.push(...schema.tables);
+                                            });
+                                        }
+                                        onToggleGroup(allTables);
+                                    }}
+                                    title="Select All"
+                                >
+                                    {/* Determine selection state */}
+                                    {(() => {
+                                        let allTables = [];
+                                        if (groupKey === 'csv') {
+                                            allTables = group.tables;
+                                        } else {
+                                            group.schemas.forEach(schema => {
+                                                allTables.push(...schema.tables);
+                                            });
+                                        }
+
+                                        const allSelected = allTables.length > 0 && allTables.every(table =>
+                                            selectedTables.some(t =>
+                                                t.table_name === table.table_name &&
+                                                (t.source_type || 'csv') === (table.source_type || 'csv') &&
+                                                t.connection_id === table.connection_id &&
+                                                t.schema_name === table.schema_name
+                                            )
+                                        );
+
+                                        const someSelected = !allSelected && allTables.some(table =>
+                                            selectedTables.some(t =>
+                                                t.table_name === table.table_name &&
+                                                (t.source_type || 'csv') === (table.source_type || 'csv') &&
+                                                t.connection_id === table.connection_id &&
+                                                t.schema_name === table.schema_name
+                                            )
+                                        );
+
+                                        if (allSelected) {
+                                            return <CheckSquare size={18} color="var(--accent-primary)" />;
+                                        } else if (someSelected) {
+                                            return <MinusSquare size={18} color="var(--accent-primary)" />;
+                                        } else {
+                                            return <Square size={18} color="var(--text-tertiary)" />;
+                                        }
+                                    })()}
+                                </div>
+
                                 {group.isEmoji ? (
                                     <span style={{ fontSize: '1.2rem' }}>{group.icon}</span>
                                 ) : (
                                     <img src={group.icon} alt={group.name} style={{ width: '20px', height: '20px' }} />
                                 )}
-                                <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>{group.name}</span>
+                                <span style={{ fontWeight: 600, fontSize: '0.9rem', flex: 1 }}>{group.name}</span>
                                 <span style={{
                                     fontSize: '0.75rem',
                                     color: 'var(--text-tertiary)',

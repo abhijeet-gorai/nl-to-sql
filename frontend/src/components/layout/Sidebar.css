@@ -103,7 +103,8 @@
     display: flex;
     align-items: center;
     gap: 0.75rem;
-    padding: 0.6rem 0.75rem;
+    padding: 0.5rem 0.75rem;
+    margin: 0.2rem 0rem;
     border-radius: var(--radius-md);
     cursor: pointer;
     transition: all 0.2s ease;
@@ -203,8 +204,13 @@
     color: var(--text-primary);
 }
 
+.table-group {
+    margin-right: 0.5rem;
+}
+
 .table-group-header {
     padding: 0.5rem 0;
+    padding-right: 0.5rem;
     cursor: pointer;
     border-radius: var(--radius-md);
     transition: background 0.2s;
@@ -212,4 +218,35 @@
 
 .table-group-header:hover {
     background: var(--bg-element);
+}
+
+/* Checkbox Styles */
+.table-checkbox {
+    display: flex;
+    align-items: center;
+    cursor: pointer;
+    position: relative;
+    margin-right: 0.5rem;
+}
+
+.table-checkbox svg {
+    display: block;
+    cursor: pointer;
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.table-checkbox svg:first-of-type {
+    animation: checkboxAppear 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes checkboxAppear {
+    0% {
+        opacity: 0;
+        transform: scale(0.8);
+    }
+
+    100% {
+        opacity: 1;
+        transform: scale(1);
+    }
 }
