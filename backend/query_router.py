@@ -351,12 +351,12 @@ def build_table_context_federated(table_names: List[str]) -> str:
     return context
 
 
-def get_all_available_tables() -> List[Dict]:
-    """Get all available tables (CSV + External) for selection"""
+def get_all_available_tables(project_id: int = None) -> List[Dict]:
+    """Get all available tables (CSV + External) for selection, optionally filtered by project"""
     tables = []
 
     # Get CSV tables
-    csv_tables = db.get_all_tables()
+    csv_tables = db.get_all_tables(project_id)
     for table in csv_tables:
         table["source_type"] = "csv"
         table["source_name"] = "Local CSV"
@@ -367,7 +367,7 @@ def get_all_available_tables() -> List[Dict]:
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
-    cursor.execute("""
+    query = """
         SELECT 
             et.id,
             et.display_name as table_name,
@@ -377,12 +377,21 @@ def get_all_available_tables() -> List[Dict]:
             'external' as source_type,
             c.connection_name as source_name,
             c.db_type,
-            et.connection_id
+            et.connection_id,
+            et.project_id
         FROM external_tables et
         JOIN db_connections c ON et.connection_id = c.id
         WHERE et.is_selected = 1
-        ORDER BY et.display_name
-    """)
+    """
+    params = []
+
+    if project_id is not None:
+        query += " AND et.project_id = ?"
+        params.append(project_id)
+
+    query += " ORDER BY et.display_name"
+
+    cursor.execute(query, tuple(params))
 
     for row in cursor.fetchall():
         table = dict(row)

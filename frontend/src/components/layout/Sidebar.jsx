@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import {
     Database, Upload, Link, Sun, Moon,
     ChevronRight, ChevronDown, Check, Pencil, Trash2,
-    CheckSquare, Square, MinusSquare, X
+    CheckSquare, Square, MinusSquare, X, ArrowLeft, FolderKanban
 } from 'lucide-react';
 import './Sidebar.css';
 
@@ -18,8 +18,11 @@ const Sidebar = ({
     onToggleGroup,
     toggleTheme,
     theme,
-    isOpen,    // New prop
-    onClose    // New prop
+    isOpen,
+    onClose,
+    projectName,
+    onBack,
+    userRole
 }) => {
     const [expandedGroups, setExpandedGroups] = useState({ csv: true });
     const [expandedSchemas, setExpandedSchemas] = useState({});
@@ -48,6 +51,9 @@ const Sidebar = ({
         };
         return iconMap[dbType] || '/data-analytics.svg';
     };
+
+    // Check if user has write access
+    const canWrite = userRole === 'write' || userRole === 'admin';
 
     // Group tables by source with schema hierarchy for external databases
     const groupedTables = useMemo(() => {
@@ -106,8 +112,26 @@ const Sidebar = ({
         <aside className={`sidebar ${isOpen ? 'mobile-open' : ''}`}>
             <div className="brand">
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                    <Database size={24} color="var(--accent-primary)" />
-                    <span className="brand-text">DataTalk</span>
+                    {onBack && (
+                        <button
+                            className="icon-btn back-btn"
+                            onClick={onBack}
+                            title="Back to Projects"
+                        >
+                            <ArrowLeft size={18} />
+                        </button>
+                    )}
+                    {projectName ? (
+                        <>
+                            <FolderKanban size={20} color="var(--accent-primary)" />
+                            <span className="brand-text project-name">{projectName}</span>
+                        </>
+                    ) : (
+                        <>
+                            <Database size={24} color="var(--accent-primary)" />
+                            <span className="brand-text">DataTalk</span>
+                        </>
+                    )}
                 </div>
                 {/* Mobile Close Button */}
                 <button className="icon-btn mobile-close-btn" onClick={onClose}>
@@ -115,29 +139,36 @@ const Sidebar = ({
                 </button>
             </div>
 
-            <label className="upload-label">
-                <Upload size={16} />
-                <span>Import CSV</span>
-                <input type="file" hidden accept=".csv" onChange={onUpload} />
-            </label>
+            {/* Only show action buttons if user has write access */}
+            {canWrite && onUpload && (
+                <label className="upload-label">
+                    <Upload size={16} />
+                    <span>Import CSV</span>
+                    <input type="file" hidden accept=".csv" onChange={onUpload} />
+                </label>
+            )}
 
-            <button
-                className="secondary-button"
-                onClick={onConnect}
-                style={{ marginTop: '0.5rem' }}
-            >
-                <Link size={16} />
-                <span>Connections</span>
-            </button>
+            {canWrite && onConnect && (
+                <button
+                    className="secondary-button"
+                    onClick={onConnect}
+                    style={{ marginTop: '0.5rem' }}
+                >
+                    <Link size={16} />
+                    <span>Connections</span>
+                </button>
+            )}
 
-            <button
-                className="secondary-button"
-                onClick={onBrowse}
-                style={{ marginTop: '0.5rem' }}
-            >
-                <Database size={16} />
-                <span>Browse Tables</span>
-            </button>
+            {canWrite && onBrowse && (
+                <button
+                    className="secondary-button"
+                    onClick={onBrowse}
+                    style={{ marginTop: '0.5rem' }}
+                >
+                    <Database size={16} />
+                    <span>Browse Tables</span>
+                </button>
+            )}
 
             <div className="section-label">Datasets</div>
             <div className="table-list">
@@ -246,22 +277,24 @@ const Sidebar = ({
                                             <div className="nav-item-title">{table.table_name}</div>
                                             <div className="nav-item-sub">{table.description || "No description"}</div>
                                         </div>
-                                        <div className="nav-item-actions" style={{ marginLeft: 'auto', display: 'flex', gap: '0.25rem' }}>
-                                            <button
-                                                className="icon-btn edit-btn"
-                                                onClick={(e) => onEditTable(e, table)}
-                                                title="Edit Metadata"
-                                            >
-                                                <Pencil size={14} />
-                                            </button>
-                                            <button
-                                                className="icon-btn delete-btn"
-                                                onClick={(e) => onDeleteTable(e, table)}
-                                                title="Delete Table"
-                                            >
-                                                <Trash2 size={14} />
-                                            </button>
-                                        </div>
+                                        {canWrite && onEditTable && onDeleteTable && (
+                                            <div className="nav-item-actions" style={{ marginLeft: 'auto', display: 'flex', gap: '0.25rem' }}>
+                                                <button
+                                                    className="icon-btn edit-btn"
+                                                    onClick={(e) => onEditTable(e, table)}
+                                                    title="Edit Metadata"
+                                                >
+                                                    <Pencil size={14} />
+                                                </button>
+                                                <button
+                                                    className="icon-btn delete-btn"
+                                                    onClick={(e) => onDeleteTable(e, table)}
+                                                    title="Delete Table"
+                                                >
+                                                    <Trash2 size={14} />
+                                                </button>
+                                            </div>
+                                        )}
                                     </div>
                                 ))}
 
@@ -302,22 +335,24 @@ const Sidebar = ({
                                                     <div className="nav-item-title">{table.table_name}</div>
                                                     <div className="nav-item-sub">{table.description || "No description"}</div>
                                                 </div>
-                                                <div className="nav-item-actions" style={{ marginLeft: 'auto', display: 'flex', gap: '0.25rem' }}>
-                                                    <button
-                                                        className="icon-btn edit-btn"
-                                                        onClick={(e) => onEditTable(e, table)}
-                                                        title="Edit Metadata"
-                                                    >
-                                                        <Pencil size={14} />
-                                                    </button>
-                                                    <button
-                                                        className="icon-btn delete-btn"
-                                                        onClick={(e) => onDeleteTable(e, table)}
-                                                        title="Delete Table"
-                                                    >
-                                                        <Trash2 size={14} />
-                                                    </button>
-                                                </div>
+                                                {canWrite && onEditTable && onDeleteTable && (
+                                                    <div className="nav-item-actions" style={{ marginLeft: 'auto', display: 'flex', gap: '0.25rem' }}>
+                                                        <button
+                                                            className="icon-btn edit-btn"
+                                                            onClick={(e) => onEditTable(e, table)}
+                                                            title="Edit Metadata"
+                                                        >
+                                                            <Pencil size={14} />
+                                                        </button>
+                                                        <button
+                                                            className="icon-btn delete-btn"
+                                                            onClick={(e) => onDeleteTable(e, table)}
+                                                            title="Delete Table"
+                                                        >
+                                                            <Trash2 size={14} />
+                                                        </button>
+                                                    </div>
+                                                )}
                                             </div>
                                         ))}
                                     </div>
@@ -330,7 +365,7 @@ const Sidebar = ({
 
             <div className="sidebar-footer">
                 <div style={{ fontSize: '0.8rem', color: 'var(--text-tertiary)' }}>
-                    v1.0.0
+                    v2.0.0
                 </div>
                 <button className="icon-btn" onClick={toggleTheme} title="Toggle Theme">
                     {theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />}

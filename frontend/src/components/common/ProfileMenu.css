@@ -1,0 +1,158 @@
+.profile-menu-wrapper {
+    position: relative;
+}
+
+.profile-trigger {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.375rem;
+    background: var(--bg-tertiary, var(--bg-element));
+    border: 1px solid var(--border-color, var(--border-subtle));
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.profile-trigger:hover {
+    background: var(--bg-hover, var(--bg-element));
+    border-color: var(--accent-primary);
+}
+
+.profile-avatar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary, #f59e0b));
+    border-radius: 6px;
+    font-size: 0.875rem;
+    font-weight: 600;
+    color: white;
+}
+
+.profile-avatar.large {
+    width: 48px;
+    height: 48px;
+    font-size: 1.25rem;
+    border-radius: 10px;
+}
+
+.profile-trigger .chevron {
+    color: var(--text-tertiary);
+    transition: transform 0.2s ease;
+}
+
+.profile-trigger .chevron.rotated {
+    transform: rotate(180deg);
+}
+
+.profile-dropdown {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    min-width: 280px;
+    background: var(--bg-secondary, var(--bg-panel));
+    border: 1px solid var(--border-color, var(--border-subtle));
+    border-radius: 12px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+    z-index: 1000;
+    overflow: hidden;
+    animation: dropdownFade 0.15s ease-out;
+}
+
+@keyframes dropdownFade {
+    from {
+        opacity: 0;
+        transform: translateY(-8px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.profile-header {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 1.25rem;
+    background: var(--bg-tertiary, var(--bg-element));
+}
+
+.profile-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.profile-name {
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.profile-email {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    margin-top: 0.125rem;
+}
+
+.profile-username {
+    font-size: 0.75rem;
+    color: var(--text-tertiary);
+    margin-top: 0.25rem;
+}
+
+.profile-divider {
+    height: 1px;
+    background: var(--border-color, var(--border-subtle));
+}
+
+.profile-actions {
+    padding: 0.5rem;
+}
+
+.profile-action {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    width: 100%;
+    padding: 0.75rem 1rem;
+    background: transparent;
+    border: none;
+    border-radius: 8px;
+    font-size: 0.875rem;
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: background 0.15s ease;
+    text-align: left;
+}
+
+.profile-action:hover {
+    background: var(--bg-hover, var(--bg-element));
+}
+
+.profile-action svg {
+    color: var(--text-tertiary);
+    flex-shrink: 0;
+}
+
+.profile-action.danger {
+    color: #ef4444;
+}
+
+.profile-action.danger svg {
+    color: #ef4444;
+}
+
+.profile-action.danger:hover {
+    background: rgba(239, 68, 68, 0.1);
+}

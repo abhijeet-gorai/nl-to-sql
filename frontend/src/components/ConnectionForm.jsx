@@ -1,11 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { X, Loader, AlertCircle } from 'lucide-react';
+import * as connectionsApi from '../api/connections';
 
-const API_BASE_URL = 'http://localhost:8000';
-
-const ConnectionForm = ({ connection, onClose, onSave }) => {
+const ConnectionForm = ({ projectId, connection, onClose, onSave }) => {
   const isEditing = !!connection;
-  
+
   const [formData, setFormData] = useState({
     connection_name: '',
     db_type: 'postgresql',
@@ -55,7 +54,7 @@ const ConnectionForm = ({ connection, onClose, onSave }) => {
       mysql: 3306,
       oracle: 1521
     };
-    
+
     setFormData(prev => ({
       ...prev,
       db_type: dbType,
@@ -65,51 +64,44 @@ const ConnectionForm = ({ connection, onClose, onSave }) => {
   };
 
   const handleTest = async () => {
+    if (!projectId) return;
+
     // For editing, if password is empty, we need to use the existing connection
     if (isEditing && !formData.password) {
       setTesting(true);
       setTestResult(null);
       setError('');
-      
+
       try {
-        const res = await fetch(`${API_BASE_URL}/connections/${connection.id}/test`, {
-          method: 'POST'
-        });
-        const result = await res.json();
-        
+        const result = await connectionsApi.testConnection(projectId, connection.id);
+
         if (result.success) {
           setTestResult({ success: true, message: result.version || result.message });
         } else {
           setTestResult({ success: false, message: result.message });
         }
       } catch (e) {
-        setTestResult({ success: false, message: e.message });
+        setTestResult({ success: false, message: e.response?.data?.detail || e.message });
       } finally {
         setTesting(false);
       }
       return;
     }
-    
+
     setTesting(true);
     setTestResult(null);
     setError('');
 
     try {
-      const res = await fetch(`${API_BASE_URL}/connections/test`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData)
-      });
+      const result = await connectionsApi.testConnectionData(projectId, formData);
 
-      const result = await res.json();
-      
       if (result.success) {
         setTestResult({ success: true, message: result.version || result.message });
       } else {
         setTestResult({ success: false, message: result.message });
       }
     } catch (e) {
-      setTestResult({ success: false, message: e.message });
+      setTestResult({ success: false, message: e.response?.data?.detail || e.message });
     } finally {
       setTesting(false);
     }
@@ -117,35 +109,26 @@ const ConnectionForm = ({ connection, onClose, onSave }) => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!projectId) return;
+
     setError('');
     setSaving(true);
 
     try {
-      const url = isEditing 
-        ? `${API_BASE_URL}/connections/${connection.id}`
-        : `${API_BASE_URL}/connections`;
-      
-      const method = isEditing ? 'PUT' : 'POST';
-      
       // For editing, only send changed fields
       const payload = isEditing && !formData.password
         ? { ...formData, password: undefined }
         : formData;
 
-      const res = await fetch(url, {
-        method,
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
-
-      if (res.ok) {
-        onSave();
+      if (isEditing) {
+        await connectionsApi.updateConnection(projectId, connection.id, payload);
       } else {
-        const errorData = await res.json();
-        setError(errorData.detail || 'Failed to save connection');
+        await connectionsApi.createConnection(projectId, payload);
       }
+
+      onSave();
     } catch (e) {
-      setError(e.message);
+      setError(e.response?.data?.detail || 'Failed to save connection');
     } finally {
       setSaving(false);
     }
@@ -201,7 +184,7 @@ const ConnectionForm = ({ connection, onClose, onSave }) => {
               <label className="field-label">Database Type *</label>
               <div className="db-type-selector">
                 {dbTypeOptions.map(option => (
-                  <label 
+                  <label
                     key={option.value}
                     className={`db-type-option ${formData.db_type === option.value ? 'selected' : ''} ${!option.enabled ? 'disabled' : ''}`}
                   >
@@ -308,9 +291,9 @@ const ConnectionForm = ({ connection, onClose, onSave }) => {
           </div>
 
           <div className="modal-actions">
-            <button 
+            <button
               type="button"
-              className="btn btn-ghost" 
+              className="btn btn-ghost"
               onClick={handleTest}
               disabled={testing || saving}
             >
@@ -324,15 +307,15 @@ const ConnectionForm = ({ connection, onClose, onSave }) => {
               )}
             </button>
             <div style={{ flex: 1 }} />
-            <button 
+            <button
               type="button"
-              className="btn btn-ghost" 
+              className="btn btn-ghost"
               onClick={onClose}
               disabled={saving}
             >
               Cancel
             </button>
-            <button 
+            <button
               type="submit"
               className="btn btn-primary"
               disabled={saving || testing}

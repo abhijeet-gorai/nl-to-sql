@@ -1,11 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Database, Plus, Trash2, Edit, CheckCircle, XCircle, Loader, X } from 'lucide-react';
 import ConnectionForm from './ConnectionForm';
+import * as connectionsApi from '../api/connections';
 import './ConnectionManager.css';
 
-const API_BASE_URL = 'http://localhost:8000';
-
-const ConnectionManager = ({ onClose, onConnectionsChange }) => {
+const ConnectionManager = ({ projectId, onClose, onConnectionsChange }) => {
   const [connections, setConnections] = useState([]);
   const [showForm, setShowForm] = useState(false);
   const [editingConnection, setEditingConnection] = useState(null);
@@ -14,19 +13,20 @@ const ConnectionManager = ({ onClose, onConnectionsChange }) => {
   const [deleteConfirm, setDeleteConfirm] = useState({ isOpen: false, connection: null });
 
   useEffect(() => {
-    fetchConnections();
+    if (projectId) {
+      fetchConnections();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [projectId]);
 
   const fetchConnections = async () => {
+    if (!projectId) return;
+
     try {
-      const res = await fetch(`${API_BASE_URL}/connections`);
-      if (res.ok) {
-        const data = await res.json();
-        setConnections(data);
-        if (onConnectionsChange) {
-          onConnectionsChange(data);
-        }
+      const data = await connectionsApi.listConnections(projectId);
+      setConnections(data);
+      if (onConnectionsChange) {
+        onConnectionsChange(data);
       }
     } catch (e) {
       console.error('Failed to fetch connections', e);
@@ -34,14 +34,13 @@ const ConnectionManager = ({ onClose, onConnectionsChange }) => {
   };
 
   const handleTest = async (connectionId) => {
+    if (!projectId) return;
+
     setTestingId(connectionId);
     setTestResults(prev => ({ ...prev, [connectionId]: null }));
 
     try {
-      const res = await fetch(`${API_BASE_URL}/connections/${connectionId}/test`, {
-        method: 'POST'
-      });
-      const result = await res.json();
+      const result = await connectionsApi.testConnection(projectId, connectionId);
 
       setTestResults(prev => ({
         ...prev,
@@ -64,7 +63,7 @@ const ConnectionManager = ({ onClose, onConnectionsChange }) => {
         ...prev,
         [connectionId]: {
           success: false,
-          message: e.message
+          message: e.response?.data?.detail || e.message
         }
       }));
     } finally {
@@ -78,21 +77,14 @@ const ConnectionManager = ({ onClose, onConnectionsChange }) => {
 
   const confirmDelete = async () => {
     const connection = deleteConfirm.connection;
-    if (!connection) return;
+    if (!connection || !projectId) return;
 
     try {
-      const res = await fetch(`${API_BASE_URL}/connections/${connection.id}`, {
-        method: 'DELETE'
-      });
-
-      if (res.ok) {
-        await fetchConnections();
-        setDeleteConfirm({ isOpen: false, connection: null });
-      } else {
-        alert('Failed to delete connection');
-      }
+      await connectionsApi.deleteConnection(projectId, connection.id);
+      await fetchConnections();
+      setDeleteConfirm({ isOpen: false, connection: null });
     } catch (e) {
-      alert(`Error: ${e.message}`);
+      alert(e.response?.data?.detail || 'Failed to delete connection');
     }
   };
 
@@ -278,6 +270,7 @@ const ConnectionManager = ({ onClose, onConnectionsChange }) => {
 
         {showForm && (
           <ConnectionForm
+            projectId={projectId}
             connection={editingConnection}
             onClose={handleFormClose}
             onSave={handleFormSave}

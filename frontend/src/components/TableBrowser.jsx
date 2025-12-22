@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { X, Search, Loader, Database, Eye, CheckSquare, Square, Check } from 'lucide-react';
 import CustomSelect from './CustomSelect';
+import * as connectionsApi from '../api/connections';
+import * as tablesApi from '../api/tables';
 import './TableBrowser.css';
 
-const API_BASE_URL = 'http://localhost:8000';
-
-const TableBrowser = ({ onClose, onTablesSynced }) => {
+const TableBrowser = ({ projectId, onClose, onTablesSynced }) => {
   const [connections, setConnections] = useState([]);
   const [selectedConnection, setSelectedConnection] = useState(null);
   const [schemas, setSchemas] = useState([]);
@@ -26,35 +26,37 @@ const TableBrowser = ({ onClose, onTablesSynced }) => {
     if (initialLoadRef.current) return;
     initialLoadRef.current = true;
 
-    fetchConnections();
-  }, []);
+    if (projectId) {
+      fetchConnections();
+    }
+  }, [projectId]);
 
   const fetchConnections = async () => {
+    if (!projectId) return;
+
     try {
-      const res = await fetch(`${API_BASE_URL}/connections`);
-      if (res.ok) {
-        const data = await res.json();
-        setConnections(data);
-      }
+      const data = await connectionsApi.listConnections(projectId);
+      setConnections(data);
     } catch (e) {
       console.error('Failed to fetch connections', e);
     }
   };
 
   const fetchSyncedTables = async (connectionId) => {
+    if (!projectId) return;
+
     try {
-      const res = await fetch(`${API_BASE_URL}/external-tables?connection_id=${connectionId}`);
-      if (res.ok) {
-        const data = await res.json();
-        const syncedNames = new Set(data.map(t => t.table_name));
-        setSyncedTables(syncedNames);
-      }
+      const data = await tablesApi.getExternalTables(projectId, connectionId);
+      const syncedNames = new Set(data.map(t => t.table_name));
+      setSyncedTables(syncedNames);
     } catch (e) {
       console.error('Failed to fetch synced tables', e);
     }
   };
 
   const handleConnectionSelect = async (connectionId) => {
+    if (!projectId) return;
+
     const connection = connections.find(c => c.id === connectionId);
     if (!connection) return;
 
@@ -67,15 +69,12 @@ const TableBrowser = ({ onClose, onTablesSynced }) => {
     setLoadingMessage('Loading schemas...');
 
     try {
-      const [schemasRes] = await Promise.all([
-        fetch(`${API_BASE_URL}/connections/${connection.id}/schemas`),
+      const [schemasData] = await Promise.all([
+        connectionsApi.listSchemas(projectId, connection.id),
         fetchSyncedTables(connection.id)
       ]);
 
-      if (schemasRes.ok) {
-        const data = await schemasRes.json();
-        setSchemas(data.schemas || []);
-      }
+      setSchemas(schemasData.schemas || []);
     } catch (e) {
       console.error('Failed to fetch schemas', e);
     } finally {
@@ -85,7 +84,7 @@ const TableBrowser = ({ onClose, onTablesSynced }) => {
   };
 
   const handleSchemaSelect = async (schema) => {
-    if (!selectedConnection) return;
+    if (!selectedConnection || !projectId) return;
 
     setSelectedSchema(schema);
     setTables([]);
@@ -94,11 +93,8 @@ const TableBrowser = ({ onClose, onTablesSynced }) => {
     setLoadingMessage('Loading tables...');
 
     try {
-      const res = await fetch(`${API_BASE_URL}/connections/${selectedConnection.id}/tables?schema=${schema}`);
-      if (res.ok) {
-        const data = await res.json();
-        setTables(data.tables || []);
-      }
+      const data = await connectionsApi.listTables(projectId, selectedConnection.id, schema);
+      setTables(data.tables || []);
     } catch (e) {
       console.error('Failed to fetch tables', e);
     } finally {
@@ -128,24 +124,27 @@ const TableBrowser = ({ onClose, onTablesSynced }) => {
   };
 
   const handlePreview = async (table) => {
+    if (!projectId || !selectedConnection) return;
+
     setPreviewTable(table);
     setPreviewData(null);
 
     try {
-      const res = await fetch(
-        `${API_BASE_URL}/connections/${selectedConnection.id}/tables/${table.table_name}/preview?schema=${selectedSchema}&limit=10`
+      const data = await connectionsApi.previewTable(
+        projectId,
+        selectedConnection.id,
+        table.table_name,
+        selectedSchema,
+        10
       );
-      if (res.ok) {
-        const data = await res.json();
-        setPreviewData(data);
-      }
+      setPreviewData(data);
     } catch (e) {
       console.error('Failed to preview table', e);
     }
   };
 
   const handleSync = async () => {
-    if (selectedTables.size === 0) {
+    if (selectedTables.size === 0 || !projectId || !selectedConnection) {
       return;
     }
 
@@ -158,25 +157,15 @@ const TableBrowser = ({ onClose, onTablesSynced }) => {
         display_name: tableName
       }));
 
-      const res = await fetch(`${API_BASE_URL}/connections/${selectedConnection.id}/tables/sync`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tables: tablesToSync })
-      });
+      const result = await connectionsApi.syncTables(projectId, selectedConnection.id, tablesToSync);
 
-      if (res.ok) {
-        const result = await res.json();
-        // Close browser and pass synced tables to parent for metadata editing
-        if (onTablesSynced) {
-          onTablesSynced(result.tables);
-        }
-        onClose();
-      } else {
-        const error = await res.json();
-        console.error('Failed to sync tables:', error.detail);
+      // Close browser and pass synced tables to parent for metadata editing
+      if (onTablesSynced) {
+        onTablesSynced(result.tables);
       }
+      onClose();
     } catch (e) {
-      console.error('Error syncing tables:', e.message);
+      console.error('Failed to sync tables:', e.response?.data?.detail || e.message);
     } finally {
       setSyncing(false);
     }
@@ -190,7 +179,7 @@ const TableBrowser = ({ onClose, onTablesSynced }) => {
     return (
       <div className="modal-overlay" onClick={onClose}>
         <div className="modal-content" onClick={e => e.stopPropagation()}>
-          <div className="modal-header">
+          <div className="modal-header" style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
             <div className="modal-title">Browse Tables</div>
             <button className="icon-btn" onClick={onClose}>
               <X size={20} />

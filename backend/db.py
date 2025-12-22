@@ -9,44 +9,67 @@ from typing import List, Dict, Optional
 DB_PATH = "database.db"
 METADATA_TABLE = "app_metadata"
 
+
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    
+
     # Create metadata table
     cursor.execute(f"""
         CREATE TABLE IF NOT EXISTS {METADATA_TABLE} (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            table_name TEXT UNIQUE NOT NULL,
+            table_name TEXT NOT NULL,
             original_filename TEXT NOT NULL,
             description TEXT,
-            columns_metadata TEXT  -- JSON string
+            columns_metadata TEXT,  -- JSON string
+            project_id INTEGER,
+            FOREIGN KEY (project_id) REFERENCES projects(id),
+            UNIQUE(table_name, project_id)
         )
     """)
+
+    # Migration: Add project_id column if it doesn't exist
+    try:
+        cursor.execute(f"ALTER TABLE {METADATA_TABLE} ADD COLUMN project_id INTEGER")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
     conn.commit()
     conn.close()
 
-def check_table_exists(table_name: str) -> bool:
-    """Checks if a table name already exists in the metadata."""
+
+def check_table_exists(table_name: str, project_id: int = None) -> bool:
+    """Checks if a table name already exists in the metadata for a project."""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute(f"SELECT 1 FROM {METADATA_TABLE} WHERE table_name = ?", (table_name,))
+    if project_id is not None:
+        cursor.execute(
+            f"SELECT 1 FROM {METADATA_TABLE} WHERE table_name = ? AND project_id = ?",
+            (table_name, project_id),
+        )
+    else:
+        cursor.execute(
+            f"SELECT 1 FROM {METADATA_TABLE} WHERE table_name = ?", (table_name,)
+        )
     exists = cursor.fetchone() is not None
     conn.close()
     return exists
 
+
 def generate_random_suffix(length: int = 6) -> str:
     return "".join(random.choices(string.ascii_lowercase + string.digits, k=length))
+
 
 def generate_table_name(filename: str) -> str:
     # Sanitize: Remove extension, non-alphanumeric, lowercase
     base = os.path.splitext(filename)[0].lower()
-    clean_base = "".join(c for c in base if c.isalnum() or c == '_')
+    clean_base = "".join(c for c in base if c.isalnum() or c == "_")
     if not clean_base:
         clean_base = "table"
-    
+
     # Default behavior: Add random suffix to ensure uniqueness for fallback
     return f"{clean_base}_{generate_random_suffix()}"
+
 
 def analyze_csv(file_path: str, original_filename: str) -> Dict:
     """
@@ -58,71 +81,79 @@ def analyze_csv(file_path: str, original_filename: str) -> Dict:
         df_preview = pd.read_csv(file_path, nrows=5)
         # Read 0 rows to get columns cheaply
         df_headers = pd.read_csv(file_path, nrows=0)
-        
+
         columns = []
         for col in df_headers.columns:
             # Simple heuristic for type
-            dtype = "TEXT" # Default
+            dtype = "TEXT"  # Default
             if col in df_preview.columns:
-                 pd_type = str(df_preview[col].dtype)
-                 if 'int' in pd_type: 
+                pd_type = str(df_preview[col].dtype)
+                if "int" in pd_type:
                     dtype = "INTEGER"
-                 elif 'float' in pd_type: 
+                elif "float" in pd_type:
                     dtype = "REAL"
-            
-            columns.append({
-                "name": col,
-                "type": dtype,
-                "description": f"Column '{col}'" 
-            })
+
+            columns.append(
+                {"name": col, "type": dtype, "description": f"Column '{col}'"}
+            )
 
         preview = df_preview.fillna("").to_dict(orient="records")
-        
+
         # Quick row count
         row_count = 0
-        with open(file_path, 'r', encoding='utf-8') as f:
+        with open(file_path, "r", encoding="utf-8") as f:
             row_count = sum(1 for _ in f) - 1
-            
+
         suggested_name = generate_table_name(original_filename)
-        
+
         return {
-            "file_path": file_path, # Temp used for next step
+            "file_path": file_path,  # Temp used for next step
             "original_filename": original_filename,
             "suggested_table_name": suggested_name,
             "description": f"Dataset imported from {original_filename}",
             "columns": columns,
             "preview": preview,
-            "row_count": row_count
+            "row_count": row_count,
         }
     except Exception as e:
         raise Exception(f"Failed to analyze CSV: {str(e)}")
 
-def register_table(file_path: str, metadata: Dict):
+
+def register_table(file_path: str, metadata: Dict, project_id: int = None):
     """
     Creates the table in SQLite and saves metadata.
     metadata structure: { table_name, description, columns: [{name, description, type}] }
     """
-    table_name = metadata['table_name']
-    
+    table_name = metadata["table_name"]
+
     try:
         conn = sqlite3.connect(DB_PATH)
         df = pd.read_csv(file_path)
-        
+
         # Sanitize columns in DF to match metadata names if we allow renaming later
-        # For now, just ensuring valid SQL identifiers 
+        # For now, just ensuring valid SQL identifiers
         df.columns = [c.strip().replace(" ", "_") for c in df.columns]
-        
+
         # Write data
-        df.to_sql(table_name, conn, if_exists='fail', index=False)
-        
+        df.to_sql(table_name, conn, if_exists="fail", index=False)
+
         # Save Metadata
         cursor = conn.cursor()
-        columns_json = json.dumps(metadata.get('columns', []))
-        cursor.execute(f"""
-            INSERT INTO {METADATA_TABLE} (table_name, original_filename, description, columns_metadata)
-            VALUES (?, ?, ?, ?)
-        """, (table_name, metadata.get('original_filename', 'unknown'), metadata.get('description', ''), columns_json))
-        
+        columns_json = json.dumps(metadata.get("columns", []))
+        cursor.execute(
+            f"""
+            INSERT INTO {METADATA_TABLE} (table_name, original_filename, description, columns_metadata, project_id)
+            VALUES (?, ?, ?, ?, ?)
+        """,
+            (
+                table_name,
+                metadata.get("original_filename", "unknown"),
+                metadata.get("description", ""),
+                columns_json,
+                project_id,
+            ),
+        )
+
         conn.commit()
         conn.close()
         return True
@@ -131,25 +162,41 @@ def register_table(file_path: str, metadata: Dict):
     except Exception as e:
         raise Exception(f"Failed to register table: {str(e)}")
 
-def update_table_metadata(table_name: str, metadata: Dict) -> bool:
+
+def update_table_metadata(
+    table_name: str, metadata: Dict, project_id: int = None
+) -> bool:
     """
     Updates description and columns_metadata for an existing table.
     """
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    
+
     try:
-        columns_json = json.dumps(metadata.get('columns', []))
-        
-        cursor.execute(f"""
-            UPDATE {METADATA_TABLE}
-            SET description = ?, columns_metadata = ?
-            WHERE table_name = ?
-        """, (metadata.get('description', ''), columns_json, table_name))
-        
+        columns_json = json.dumps(metadata.get("columns", []))
+
+        if project_id is not None:
+            cursor.execute(
+                f"""
+                UPDATE {METADATA_TABLE}
+                SET description = ?, columns_metadata = ?
+                WHERE table_name = ? AND project_id = ?
+            """,
+                (metadata.get("description", ""), columns_json, table_name, project_id),
+            )
+        else:
+            cursor.execute(
+                f"""
+                UPDATE {METADATA_TABLE}
+                SET description = ?, columns_metadata = ?
+                WHERE table_name = ?
+            """,
+                (metadata.get("description", ""), columns_json, table_name),
+            )
+
         if cursor.rowcount == 0:
             return False
-            
+
         conn.commit()
         return True
     except Exception as e:
@@ -158,7 +205,8 @@ def update_table_metadata(table_name: str, metadata: Dict) -> bool:
     finally:
         conn.close()
 
-def delete_table(table_name: str) -> bool:
+
+def delete_table(table_name: str, project_id: int = None) -> bool:
     """
     Drops the table and removes its metadata.
     Returns False if the table does not exist.
@@ -169,8 +217,7 @@ def delete_table(table_name: str) -> bool:
     try:
         # Check if table exists
         cursor.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?",
-            (table_name,)
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table_name,)
         )
         table_exists = cursor.fetchone() is not None
 
@@ -181,10 +228,15 @@ def delete_table(table_name: str) -> bool:
         cursor.execute(f"DROP TABLE IF EXISTS {table_name}")
 
         # Remove metadata
-        cursor.execute(
-            f"DELETE FROM {METADATA_TABLE} WHERE table_name = ?",
-            (table_name,)
-        )
+        if project_id is not None:
+            cursor.execute(
+                f"DELETE FROM {METADATA_TABLE} WHERE table_name = ? AND project_id = ?",
+                (table_name, project_id),
+            )
+        else:
+            cursor.execute(
+                f"DELETE FROM {METADATA_TABLE} WHERE table_name = ?", (table_name,)
+            )
 
         conn.commit()
         return True
@@ -196,31 +248,43 @@ def delete_table(table_name: str) -> bool:
     finally:
         conn.close()
 
-def get_all_tables() -> List[Dict]:
+
+def get_all_tables(project_id: int = None) -> List[Dict]:
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    
+
     # Check if metadata table exists (migration check)
     try:
-        cursor.execute(f"SELECT * FROM {METADATA_TABLE}")
+        if project_id is not None:
+            cursor.execute(
+                f"SELECT * FROM {METADATA_TABLE} WHERE project_id = ?", (project_id,)
+            )
+        else:
+            cursor.execute(f"SELECT * FROM {METADATA_TABLE}")
         rows = cursor.fetchall()
     except sqlite3.OperationalError:
         # If table doesn't exist, maybe it's old DB. Init and try again.
         init_db()
         return []
-    
+
     tables = []
     for row in rows:
-        tables.append({
-            "id": row["id"],
-            "table_name": row["table_name"],
-            "original_filename": row["original_filename"],
-            "description": row["description"],
-            "columns": json.loads(row["columns_metadata"]) if row["columns_metadata"] else []
-        })
+        tables.append(
+            {
+                "id": row["id"],
+                "table_name": row["table_name"],
+                "original_filename": row["original_filename"],
+                "description": row["description"],
+                "columns": json.loads(row["columns_metadata"])
+                if row["columns_metadata"]
+                else [],
+                "project_id": row["project_id"] if "project_id" in row.keys() else None,
+            }
+        )
     conn.close()
     return tables
+
 
 def get_table_context(table_names: List[str]) -> str:
     """
@@ -228,19 +292,22 @@ def get_table_context(table_names: List[str]) -> str:
     """
     if not table_names:
         return ""
-        
+
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
-    
-    placeholders = ','.join('?' for _ in table_names)
+
+    placeholders = ",".join("?" for _ in table_names)
     try:
-        cursor.execute(f"SELECT * FROM {METADATA_TABLE} WHERE table_name IN ({placeholders})", table_names)
+        cursor.execute(
+            f"SELECT * FROM {METADATA_TABLE} WHERE table_name IN ({placeholders})",
+            table_names,
+        )
         rows = cursor.fetchall()
     except:
         return ""
     conn.close()
-    
+
     context = ""
     for row in rows:
         context += f"Table: {row['table_name']}\n"
@@ -248,10 +315,13 @@ def get_table_context(table_names: List[str]) -> str:
         context += "Columns:\n"
         cols = json.loads(row["columns_metadata"]) if row["columns_metadata"] else []
         for col in cols:
-            context += f"  - {col['name']} ({col['type']}): {col.get('description', '')}\n"
+            context += (
+                f"  - {col['name']} ({col['type']}): {col.get('description', '')}\n"
+            )
         context += "\n"
-        
+
     return context
+
 
 def execute_query(query: str):
     """
@@ -259,7 +329,7 @@ def execute_query(query: str):
     """
     if not query.strip().lower().startswith("select"):
         return "Error: Only SELECT queries are allowed."
-        
+
     conn = sqlite3.connect(DB_PATH)
     try:
         df = pd.read_sql_query(query, conn)
@@ -269,13 +339,14 @@ def execute_query(query: str):
         conn.close()
         return f"Error executing query: {str(e)}"
 
+
 def get_raw_dataframe(query: str) -> Optional[pd.DataFrame]:
     """
     Executes a read-only SQL query and returns the pandas DataFrame directly.
     """
     if not query.strip().lower().startswith("select"):
         return None
-        
+
     conn = sqlite3.connect(DB_PATH)
     try:
         df = pd.read_sql_query(query, conn)

@@ -96,7 +96,9 @@ def enrich_metadata_with_ai(table_metadata: Dict, sample_data: pd.DataFrame) -> 
         return table_metadata
 
 
-def sync_external_tables(connection_id: int, selected_tables: List[Dict]) -> bool:
+def sync_external_tables(
+    connection_id: int, selected_tables: List[Dict], project_id: int = None
+) -> bool:
     """Sync selected tables metadata to local database"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
@@ -131,8 +133,8 @@ def sync_external_tables(connection_id: int, selected_tables: List[Dict]) -> boo
                 f"""
                 INSERT OR REPLACE INTO {EXTERNAL_TABLES_TABLE}
                 (connection_id, schema_name, table_name, display_name, description, 
-                 columns_metadata, row_count, last_synced, is_selected)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 columns_metadata, row_count, last_synced, is_selected, project_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
                 (
                     connection_id,
@@ -144,6 +146,7 @@ def sync_external_tables(connection_id: int, selected_tables: List[Dict]) -> boo
                     metadata.get("row_count", 0),
                     datetime.now().isoformat(),
                     1,  # Mark as selected by default
+                    project_id,
                 ),
             )
 
@@ -158,30 +161,33 @@ def sync_external_tables(connection_id: int, selected_tables: List[Dict]) -> boo
         conn.close()
 
 
-def get_external_tables(connection_id: int = None) -> List[Dict]:
-    """Get all external tables, optionally filtered by connection"""
+def get_external_tables(
+    connection_id: int = None, project_id: int = None
+) -> List[Dict]:
+    """Get all external tables, optionally filtered by connection and/or project"""
     conn = sqlite3.connect(DB_PATH)
     conn.row_factory = sqlite3.Row
     cursor = conn.cursor()
 
-    if connection_id:
-        cursor.execute(
-            f"""
-            SELECT et.*, c.connection_name, c.db_type
-            FROM {EXTERNAL_TABLES_TABLE} et
-            JOIN db_connections c ON et.connection_id = c.id
-            WHERE et.connection_id = ?
-            ORDER BY et.display_name
-        """,
-            (connection_id,),
-        )
-    else:
-        cursor.execute(f"""
-            SELECT et.*, c.connection_name, c.db_type
-            FROM {EXTERNAL_TABLES_TABLE} et
-            JOIN db_connections c ON et.connection_id = c.id
-            ORDER BY et.display_name
-        """)
+    query = f"""
+        SELECT et.*, c.connection_name, c.db_type
+        FROM {EXTERNAL_TABLES_TABLE} et
+        JOIN db_connections c ON et.connection_id = c.id
+        WHERE 1=1
+    """
+    params = []
+
+    if connection_id is not None:
+        query += " AND et.connection_id = ?"
+        params.append(connection_id)
+
+    if project_id is not None:
+        query += " AND et.project_id = ?"
+        params.append(project_id)
+
+    query += " ORDER BY et.display_name"
+
+    cursor.execute(query, tuple(params))
 
     tables = []
     for row in cursor.fetchall():
