@@ -158,7 +158,7 @@ const ConnectionForm = ({ projectId, connection, onClose, onSave }) => {
         </div>
 
         <form onSubmit={handleSubmit}>
-          <div className="form-body" style={{ padding: '1.5rem' }}>
+          <div className="form-body" style={{ padding: '1.5rem 1.5rem 0 1.5rem' }}>
             {error && (
               <div className="alert alert-error">
                 <AlertCircle size={16} />
