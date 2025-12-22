@@ -2,7 +2,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from fastapi import FastAPI, UploadFile, File, HTTPException, Depends
+from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, Request
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -549,7 +549,10 @@ async def list_external_tables_project(
 
 @app.post("/projects/{project_id}/chat")
 async def chat_project(
-    project_id: int, request: ChatRequest, access: dict = Depends(require_read_access)
+    project_id: int,
+    request: ChatRequest,
+    http_request: Request,
+    access: dict = Depends(require_read_access),
 ):
     """Chat with tables in a project (requires read access)"""
     try:
@@ -585,9 +588,15 @@ async def chat_project(
                         detail=f"Table '{table.table_name}' with the specified source is not available in this project",
                     )
 
+        # Extract base URL from the incoming request
+        base_url = str(http_request.base_url).rstrip("/")
+
         return StreamingResponse(
             agent.stream_question(
-                request.message, request.selected_tables, request.thread_id
+                request.message,
+                request.selected_tables,
+                request.thread_id,
+                base_url=base_url,
             ),
             media_type="application/x-ndjson",
         )

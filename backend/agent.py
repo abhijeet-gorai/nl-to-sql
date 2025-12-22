@@ -21,6 +21,7 @@ load_dotenv()
 
 class CustomState(AgentState):
     selected_tables: list[dict]
+    base_url: str  # Base URL for generating chart image URLs
 
 
 # Initialize Watsonx Chat Model
@@ -113,8 +114,11 @@ def generate_chart(
         plt.savefig(filepath)
         plt.close()
 
+        # Get base URL from runtime state
+        base_url = runtime.state.get("base_url", "http://localhost:8000")
+
         # Return Markdown Image
-        return f"![{title}](http://localhost:8000/charts/{filename})"
+        return f"![{title}]({base_url}/charts/{filename})"
 
     except Exception as e:
         plt.close()
@@ -175,7 +179,10 @@ def generate_custom_chart(python_code: str, runtime: ToolRuntime) -> str:
             plt.savefig(filepath)
             plt.close("all")  # Close all figures to clean up
 
-            return f"![Custom Chart](http://localhost:8000/charts/{filename})"
+            # Get base URL from runtime state
+            base_url = runtime.state.get("base_url", "http://localhost:8000")
+
+            return f"![Custom Chart]({base_url}/charts/{filename})"
         else:
             return "Error: No chart was created. Did you forget to call plt.plot()?"
 
@@ -256,11 +263,20 @@ def generate_table_metadata(
 
 
 async def stream_question(
-    user_question: str, selected_tables: list[dict], thread_id: str = "1"
+    user_question: str,
+    selected_tables: list[dict],
+    thread_id: str = "1",
+    base_url: str = "http://localhost:8000",
 ):
     """
     Streams events (tool usage, response tokens) from the agent.
     Supports both local CSV tables and external database tables.
+
+    Args:
+        user_question: The user's natural language question.
+        selected_tables: List of table configurations to query.
+        thread_id: Thread ID for conversation context.
+        base_url: Base URL of the server (for chart image URLs).
     """
 
     config = {"configurable": {"thread_id": thread_id}}
@@ -286,6 +302,7 @@ async def stream_question(
         {
             "messages": [("user", augmented_question)],
             "selected_tables": selected_tables,
+            "base_url": base_url,
         },
         config,
         version="v1",
