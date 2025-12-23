@@ -1,0 +1,37 @@
+.vega-chart-container {
+    margin: 1rem 0;
+    padding: 1rem;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    overflow: hidden;
+    width: 100%;
+    min-width: 600px;
+}
+
+.vega-chart-container canvas,
+.vega-chart-container svg {
+    max-width: 100%;
+    height: auto;
+}
+
+/* Vega embed actions styling */
+.vega-chart-container .vega-actions {
+    background: transparent;
+    padding: 0.5rem 0 0 0;
+}
+
+.vega-chart-container .vega-actions a {
+    color: var(--text-secondary);
+    text-decoration: none;
+    font-size: 0.875rem;
+    padding: 0.25rem 0.5rem;
+    margin-right: 0.5rem;
+    border-radius: 4px;
+    transition: all 0.2s;
+}
+
+.vega-chart-container .vega-actions a:hover {
+    background: var(--bg-hover);
+    color: var(--text-primary);
+}

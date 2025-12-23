@@ -5,6 +5,7 @@ import rehypeRaw from 'rehype-raw';
 import { Send, Sparkles, RotateCcw, User, Cpu, Database, Users, Upload, Link, Table } from 'lucide-react';
 
 import ReasoningAccordion from './ReasoningAccordion';
+import VegaChartRenderer from './VegaChartRenderer';
 import ProfileMenu from '../common/ProfileMenu';
 import '../common/EmptyState.css'; // Reuse empty state styles
 import './ChatInterface.css';
@@ -143,6 +144,16 @@ const ChatInterface = ({
                                                 {msg.content}
                                             </ReactMarkdown>
                                         </div>
+                                        {msg.charts && msg.charts.length > 0 && (
+                                            <div className="charts-container">
+                                                {msg.charts.map((chartSpec, chartIdx) => (
+                                                    <VegaChartRenderer
+                                                        key={chartIdx}
+                                                        spec={chartSpec}
+                                                    />
+                                                ))}
+                                            </div>
+                                        )}
                                         {msg.steps && msg.steps.length > 0 && (
                                             <ReasoningAccordion steps={msg.steps} />
                                         )}

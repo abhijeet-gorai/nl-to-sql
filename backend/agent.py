@@ -1,7 +1,9 @@
 from langchain_ibm import ChatWatsonx
 from langchain.tools import tool, ToolRuntime
 from langchain.agents import AgentState, create_agent
+from langchain.messages import ToolMessage
 from langgraph.checkpoint.memory import MemorySaver
+from langgraph.types import Command
 from langchain_core.output_parsers import JsonOutputParser
 import os
 import db
@@ -22,6 +24,7 @@ load_dotenv()
 class CustomState(AgentState):
     selected_tables: list[dict]
     base_url: str  # Base URL for generating chart image URLs
+    charts: list[dict]  # List of Vega-Lite chart specifications
 
 
 # Initialize Watsonx Chat Model
@@ -190,8 +193,275 @@ def generate_custom_chart(python_code: str, runtime: ToolRuntime) -> str:
         plt.close("all")
         return f"Error executing custom chart code: {e}"
 
+@tool
+def generate_chart_frontend(
+    query: str,
+    chart_type: str,
+    x_col: str,
+    y_col: str,
+    runtime: ToolRuntime,
+    title: str = "",
+    x_label: str = "",
+    y_label: str = "",
+) -> Command:
+    """
+    Generates a Vega-Lite chart specification for STANDARD charts (bar, line, area, point/scatter).
+    This returns a JSON specification that will be rendered in the frontend.
+    Use this for simple, single-series visualizations.
+    
+    Args:
+        query: The SQL query to fetch data.
+        chart_type: 'bar', 'line', 'area', or 'point' (for scatter).
+        x_col: Column name for X axis.
+        y_col: Column name for Y axis.
+        title: Chart title (optional).
+        x_label: X axis label (optional, defaults to x_col).
+        y_label: Y axis label (optional, defaults to y_col).
+    
+    Returns:
+        Command to update state with chart specification.
+    """
+    try:
+        # Execute query to get data
+        selected_tables = runtime.state["selected_tables"]
+        df = query_router.execute_federated_query(query, selected_tables)
+        
+        if df is None or df.empty:
+            return Command(
+                update={
+                    "messages": [
+                        ToolMessage(
+                            content="Error: Query returned no data.",
+                            tool_call_id=runtime.tool_call_id,
+                            name="generate_chart_frontend",
+                        )
+                    ]
+                }
+            )
+        
+        if x_col not in df.columns or y_col not in df.columns:
+            return Command(
+                update={
+                    "messages": [
+                        ToolMessage(
+                            content=f"Error: Columns {x_col} or {y_col} not found in results: {list(df.columns)}",
+                            tool_call_id=runtime.tool_call_id,
+                            name="generate_chart_frontend",
+                        )
+                    ]
+                }
+            )
+        
+        # Convert DataFrame to list of records for Vega-Lite
+        data_values = df[[x_col, y_col]].to_dict(orient="records")
+        
+        # Map chart types to Vega-Lite mark types
+        mark_type_map = {
+            "bar": "bar",
+            "line": "line",
+            "area": "area",
+            "point": "point",
+            "scatter": "point",
+        }
+        
+        mark_type = mark_type_map.get(chart_type.lower())
+        if not mark_type:
+            return Command(
+                update={
+                    "messages": [
+                        ToolMessage(
+                            content=f"Error: Unsupported chart type '{chart_type}'. Use: bar, line, area, point, or scatter.",
+                            tool_call_id=runtime.tool_call_id,
+                            name="generate_chart_frontend",
+                        )
+                    ]
+                }
+            )
+        
+        # Build Vega-Lite specification
+        vega_spec = {
+            "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+            "description": title or f"{chart_type.capitalize()} chart",
+            "title": title if title else None,
+            "data": {"values": data_values},
+            "mark": {"type": mark_type, "tooltip": True},
+            "encoding": {
+                "x": {
+                    "field": x_col,
+                    "type": "nominal" if df[x_col].dtype == "object" else "quantitative",
+                    "title": x_label or x_col,
+                },
+                "y": {
+                    "field": y_col,
+                    "type": "quantitative",
+                    "title": y_label or y_col,
+                },
+            },
+            "width": 600,
+            "height": 400,
+        }
+        
+        # Remove None title if not provided
+        if not vega_spec["title"]:
+            del vega_spec["title"]
+        
+        # Get current charts and append new one
+        current_charts = runtime.state.get("charts", [])
+        updated_charts = current_charts + [vega_spec]
+        
+        return Command(
+            update={
+                "messages": [
+                    ToolMessage(
+                        content="✓ Chart specification created successfully. Chart will be displayed after response completes.",
+                        tool_call_id=runtime.tool_call_id,
+                        name="generate_chart_frontend",
+                    )
+                ],
+                "charts": updated_charts
+            }
+        )
+        
+    except Exception as e:
+        return Command(
+            update={
+                "messages": [
+                    ToolMessage(
+                        content=f"Error generating chart specification: {str(e)}",
+                        tool_call_id=runtime.tool_call_id,
+                        name="generate_chart_frontend",
+                    )
+                ]
+            }
+        )
 
-tools = [execute_query, generate_chart, generate_custom_chart]
+
+@tool
+def generate_custom_chart_frontend(
+    query: str,
+    vega_lite_spec: dict,
+    runtime: ToolRuntime,
+) -> Command:
+    """
+    Generates a CUSTOM Vega-Lite chart specification for complex visualizations.
+    Use this when 'generate_chart_frontend' is insufficient (e.g., multi-series, dual-axis,
+    heatmaps, layered charts, or advanced formatting).
+    
+    Args:
+        query: The SQL query to fetch data.
+        vega_lite_spec: A partial or complete Vega-Lite specification (dict).
+                       The data will be fetched and injected automatically.
+                       You can provide encoding, mark, transform, etc.
+    
+    Example vega_lite_spec for a grouped bar chart:
+    {
+        "mark": "bar",
+        "encoding": {
+            "x": {"field": "category", "type": "nominal"},
+            "y": {"field": "value", "type": "quantitative"},
+            "color": {"field": "group", "type": "nominal"}
+        }
+    }
+    
+    Returns:
+        Command to update state with custom chart specification.
+    """
+    try:
+        # Execute query to get data
+        selected_tables = runtime.state["selected_tables"]
+        df = query_router.execute_federated_query(query, selected_tables)
+        
+        if df is None or df.empty:
+            return Command(
+                update={
+                    "messages": [
+                        ToolMessage(
+                            content="Error: Query returned no data.",
+                            tool_call_id=runtime.tool_call_id,
+                            name="generate_custom_chart_frontend",
+                        )
+                    ]
+                }
+            )
+        # Validate that spec has required visualization properties
+        required_props = ["mark", "layer", "facet", "hconcat", "vconcat", "concat", "repeat"]
+        has_valid_prop = False
+        
+        for prop in required_props:
+            if prop in vega_lite_spec and vega_lite_spec[prop]:
+                has_valid_prop = True
+                break
+        
+        if not has_valid_prop:
+            return Command(
+                update={
+                    "messages": [
+                        ToolMessage(
+                            content=f"Error: Vega-Lite specification must include at least one of: {', '.join(required_props)}. The property must not be empty.",
+                            tool_call_id=runtime.tool_call_id,
+                            name="generate_custom_chart_frontend",
+                        )
+                    ]
+                }
+            )
+        
+        
+        # Convert DataFrame to list of records
+        data_values = df.to_dict(orient="records")
+        
+        # Build complete Vega-Lite specification
+        complete_spec = {
+            "$schema": "https://vega.github.io/schema/vega-lite/v6.json",
+            "data": {"values": data_values},
+            "width": 600,
+            "height": 400,
+        }
+        
+        # Merge with provided spec
+        complete_spec.update(vega_lite_spec)
+        
+        # Ensure data is set correctly (don't let user override)
+        complete_spec["data"] = {"values": data_values}
+        
+        # Get current charts and append new one
+        current_charts = runtime.state.get("charts", [])
+        updated_charts = current_charts + [complete_spec]
+        
+        return Command(
+            update={
+                "messages": [
+                    ToolMessage(
+                        content="✓ Custom chart specification created successfully. Chart will be displayed after response completes.",
+                        tool_call_id=runtime.tool_call_id,
+                        name="generate_custom_chart_frontend",
+                    )
+                ],
+                "charts": updated_charts
+            }
+        )
+        
+    except Exception as e:
+        return Command(
+            update={
+                "messages": [
+                    ToolMessage(
+                        content=f"Error generating custom chart specification: {str(e)}",
+                        tool_call_id=runtime.tool_call_id,
+                        name="generate_custom_chart_frontend",
+                    )
+                ]
+            }
+        )
+
+
+
+tools = [
+    execute_query,
+    generate_chart,
+    generate_custom_chart,
+    generate_chart_frontend,
+    generate_custom_chart_frontend,
+]
 
 
 # Validate that we have the necessary credentials
@@ -207,8 +477,6 @@ validate_creds()
 # we can pass thread_id to resume).
 memory = MemorySaver()
 agent_executor = create_agent(llm, tools, checkpointer=memory, state_schema=CustomState)
-
-# ... imports ...
 
 
 def generate_table_metadata(
@@ -296,13 +564,14 @@ async def stream_question(
     2. IMPORTANT: Tables may come from different sources (local CSV or external databases).
     3. When querying external database tables, use schema_name.table_name for the table name.
     """
-    print(augmented_question)
+    # print(augmented_question)
     # Use astream_events to get granular updates including tokens
     async for event in agent_executor.astream_events(
         {
             "messages": [("user", augmented_question)],
             "selected_tables": selected_tables,
             "base_url": base_url,
+            "charts": [],  # Initialize empty charts list
         },
         config,
         version="v1",
@@ -334,13 +603,27 @@ async def stream_question(
         elif kind == "on_tool_end":
             if event["name"] not in ["_Exception"]:
                 output = event["data"].get("output")
+                if isinstance(output, Command):
+                    output_content = output.update.get("messages")[-1].content
+                else:
+                    output_content = output.content if hasattr(output, "content") else str(output)
                 yield (
                     json.dumps(
                         {
                             "type": "tool_end",
                             "tool": event["name"],
-                            "output": output.content,
+                            "output": output_content
                         }
                     )
                     + "\n"
                 )
+
+    # After streaming completes, get final state and yield charts if any
+    try:
+        final_state = agent_executor.get_state(config)
+        charts = final_state.values.get("charts", [])
+        if charts:
+            yield json.dumps({"type": "charts", "charts": charts}) + "\n"
+    except Exception as e:
+        print(f"Error retrieving charts from state: {e}")
+    # print(agent_executor.get_state(config=config))

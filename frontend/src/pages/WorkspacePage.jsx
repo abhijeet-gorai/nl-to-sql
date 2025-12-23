@@ -490,6 +490,9 @@ const WorkspacePage = () => {
                                     }
                                     lastMsg.steps = steps;
                                 }
+                            } else if (data.type === 'charts') {
+                                // Store chart specifications in the message
+                                lastMsg.charts = data.charts;
                             }
                             newMessages[lastMsgIndex] = lastMsg;
                             return newMessages;
