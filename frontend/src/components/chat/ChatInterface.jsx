@@ -8,6 +8,99 @@ import ReasoningAccordion from './ReasoningAccordion';
 import VegaChartRenderer from './VegaChartRenderer';
 import ProfileMenu from '../common/ProfileMenu';
 import '../common/EmptyState.css'; // Reuse empty state styles
+
+// Helper function to render content with inline charts
+const renderContentWithCharts = (content, charts) => {
+    if (!charts || charts.length === 0) {
+        return <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]} components={{
+            table: ({ ...props }) => (
+                <div className="table-wrapper">
+                    <table {...props} />
+                </div>
+            )
+        }}>{content}</ReactMarkdown>;
+    }
+
+    // Track which charts have been referenced
+    const referencedCharts = new Set();
+    
+    // Split content by [CHART:n] markers
+    const parts = [];
+    let lastIndex = 0;
+    const chartRegex = /\[CHART:(\d+)\]/g;
+    let match;
+
+    while ((match = chartRegex.exec(content)) !== null) {
+        const chartIndex = parseInt(match[1], 10);
+        
+        // Add text before the marker
+        if (match.index > lastIndex) {
+            parts.push({
+                type: 'text',
+                content: content.substring(lastIndex, match.index)
+            });
+        }
+        
+        // Add chart if it exists
+        if (chartIndex < charts.length) {
+            parts.push({
+                type: 'chart',
+                index: chartIndex,
+                spec: charts[chartIndex]
+            });
+            referencedCharts.add(chartIndex);
+        }
+        
+        lastIndex = match.index + match[0].length;
+    }
+    
+    // Add remaining text
+    if (lastIndex < content.length) {
+        parts.push({
+            type: 'text',
+            content: content.substring(lastIndex)
+        });
+    }
+    
+    // Find unreferenced charts
+    const unreferencedCharts = charts
+        .map((spec, idx) => ({ spec, idx }))
+        .filter(({ idx }) => !referencedCharts.has(idx));
+
+    return (
+        <>
+            {parts.map((part, idx) => {
+                if (part.type === 'text') {
+                    return (
+                        <ReactMarkdown
+                            key={idx}
+                            remarkPlugins={[remarkGfm]}
+                            rehypePlugins={[rehypeRaw]}
+                            components={{
+                                table: ({ ...props }) => (
+                                    <div className="table-wrapper">
+                                        <table {...props} />
+                                    </div>
+                                )
+                            }}
+                        >
+                            {part.content}
+                        </ReactMarkdown>
+                    );
+                } else {
+                    return <VegaChartRenderer key={`chart-${idx}`} spec={part.spec} />;
+                }
+            })}
+            {unreferencedCharts.length > 0 && (
+                <div className="charts-container">
+                    {unreferencedCharts.map(({ spec, idx }) => (
+                        <VegaChartRenderer key={`unreferenced-${idx}`} spec={spec} />
+                    ))}
+                </div>
+            )}
+        </>
+    );
+};
 import './ChatInterface.css';
 
 const ChatInterface = ({
@@ -130,30 +223,8 @@ const ChatInterface = ({
                                 ) : (
                                     <>
                                         <div className="msg-content">
-                                            <ReactMarkdown
-                                                remarkPlugins={[remarkGfm]}
-                                                rehypePlugins={[rehypeRaw]}
-                                                components={{
-                                                    table: ({ ...props }) => (
-                                                        <div className="table-wrapper">
-                                                            <table {...props} />
-                                                        </div>
-                                                    )
-                                                }}
-                                            >
-                                                {msg.content}
-                                            </ReactMarkdown>
+                                            {renderContentWithCharts(msg.content, msg.charts)}
                                         </div>
-                                        {msg.charts && msg.charts.length > 0 && (
-                                            <div className="charts-container">
-                                                {msg.charts.map((chartSpec, chartIdx) => (
-                                                    <VegaChartRenderer
-                                                        key={chartIdx}
-                                                        spec={chartSpec}
-                                                    />
-                                                ))}
-                                            </div>
-                                        )}
                                         {msg.steps && msg.steps.length > 0 && (
                                             <ReasoningAccordion steps={msg.steps} />
                                         )}

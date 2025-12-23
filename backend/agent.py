@@ -307,13 +307,14 @@ def generate_chart_frontend(
         
         # Get current charts and append new one
         current_charts = runtime.state.get("charts", [])
+        chart_number = len(current_charts)
         updated_charts = current_charts + [vega_spec]
         
         return Command(
             update={
                 "messages": [
                     ToolMessage(
-                        content="✓ Chart specification created successfully. Chart will be displayed after response completes.",
+                        content=f"[CHART:{chart_number}] - Chart specification created successfully. Chart will be displayed after response completes.",
                         tool_call_id=runtime.tool_call_id,
                         name="generate_chart_frontend",
                     )
@@ -425,13 +426,14 @@ def generate_custom_chart_frontend(
         
         # Get current charts and append new one
         current_charts = runtime.state.get("charts", [])
+        chart_number = len(current_charts)
         updated_charts = current_charts + [complete_spec]
         
         return Command(
             update={
                 "messages": [
                     ToolMessage(
-                        content="✓ Custom chart specification created successfully. Chart will be displayed after response completes.",
+                        content=f"[CHART:{chart_number}] - Custom chart specification created successfully. Chart will be displayed after response completes.",
                         tool_call_id=runtime.tool_call_id,
                         name="generate_custom_chart_frontend",
                     )
@@ -521,14 +523,21 @@ When creating visualizations, you have TWO sets of tools:
    - Area charts: Cumulative values over time
 3. For complex visualizations (multi-series, dual-axis, heatmaps), use `generate_custom_chart_frontend`
 4. Provide clear, descriptive titles and axis labels
-5. Only fall back to legacy tools if frontend tools consistently fail
+5. **IMPORTANT**: After calling a chart tool, reference it in your response using `[CHART:n]` where n is the chart index (0, 1, 2, etc.)
+   - First chart created: `[CHART:0]`
+   - Second chart created: `[CHART:1]`
+   - Place the marker where you want the chart to appear in your response
+   - Example: "Here are the sales by category: [CHART:0]. As you can see, Electronics leads with..."
+6. Only fall back to legacy tools if frontend tools consistently fail
 
 ### Communication:
 1. Be concise and direct in your responses
 2. Explain your analysis clearly
 3. When charts are generated, focus on insights - don't mention "the chart will be displayed"
-4. If queries return no data, explain why and suggest alternatives
-5. If you encounter errors, explain them clearly and suggest solutions
+4. Whenever you are displaying charts, also give your analysis of the data present in the chart.
+5. If queries return no data, explain why and suggest alternatives
+6. If you encounter errors, explain them clearly and suggest solutions
+7. Even when you are generating charts, you must answer the user query in text.
 
 ### Data Privacy:
 - Only query tables that are explicitly provided in the context
@@ -713,4 +722,4 @@ async def stream_question(
             yield json.dumps({"type": "charts", "charts": charts}) + "\n"
     except Exception as e:
         print(f"Error retrieving charts from state: {e}")
-    # print(agent_executor.get_state(config=config))
+    print(agent_executor.get_state(config=config).values.get("messages")[-1])
