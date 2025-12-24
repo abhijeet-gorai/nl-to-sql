@@ -8,6 +8,7 @@ from langchain_core.output_parsers import JsonOutputParser
 import os
 import db
 import query_router
+import user_credentials
 from dotenv import load_dotenv
 
 import matplotlib
@@ -27,18 +28,63 @@ class CustomState(AgentState):
     charts: list[dict]  # List of Vega-Lite chart specifications
 
 
-# Initialize Watsonx Chat Model
-# Ideally these are set in environment variables:
-# WATSONX_APIKEY, WATSONX_PROJECT_ID, WATSONX_URL
-llm = ChatWatsonx(
-    model_id="openai/gpt-oss-120b",
-    url=os.getenv("WATSONX_URL", "https://us-south.ml.cloud.ibm.com"),
-    project_id=os.getenv("WATSONX_PROJECT_ID"),
-    params={
-        "temperature": 0,
-        "max_tokens": 4000,
-    },
-)
+# ============================================
+# LLM Caching System
+# ============================================
+
+# In-memory cache: {user_id: {"llm": ChatWatsonx, "credentials_hash": str}}
+# "default" key for default credentials from .env
+_llm_cache = {}
+
+
+def invalidate_llm_cache(user_id: int):
+    """Call when user credentials are updated or deleted."""
+    if user_id in _llm_cache:
+        del _llm_cache[user_id]
+
+
+def get_llm_for_user(user_id: int = None) -> ChatWatsonx:
+    """
+    Returns a cached ChatWatsonx instance with appropriate credentials.
+    Uses user credentials if available, otherwise falls back to default.
+    """
+    if user_id:
+        creds = user_credentials.get_credentials(user_id)
+        if creds:
+            creds_hash = user_credentials.get_credentials_hash(user_id)
+            cached = _llm_cache.get(user_id)
+            
+            # Return cached if credentials haven't changed
+            if cached and cached.get("credentials_hash") == creds_hash:
+                return cached["llm"]
+            
+            # Create new and cache
+            llm = ChatWatsonx(
+                model_id="openai/gpt-oss-120b",
+                url=creds["watsonx_url"],
+                project_id=creds["watsonx_project_id"],
+                apikey=creds["watsonx_api_key"],
+                params={"temperature": 0, "max_tokens": 4000},
+            )
+            _llm_cache[user_id] = {"llm": llm, "credentials_hash": creds_hash}
+            return llm
+    
+    # Fall back to default (also cached)
+    if "default" in _llm_cache:
+        return _llm_cache["default"]["llm"]
+    
+    default_llm = ChatWatsonx(
+        model_id="openai/gpt-oss-120b",
+        url=os.getenv("WATSONX_URL", "https://us-south.ml.cloud.ibm.com"),
+        project_id=os.getenv("WATSONX_PROJECT_ID"),
+        params={"temperature": 0, "max_tokens": 4000},
+    )
+    _llm_cache["default"] = {"llm": default_llm, "credentials_hash": "default"}
+    return default_llm
+
+
+# Default LLM for backwards compatibility (tools still reference 'llm')
+llm = get_llm_for_user()
 
 
 @tool
@@ -576,14 +622,23 @@ agent_executor = create_agent(
 
 
 def generate_table_metadata(
-    preview_data: dict, filename: str, existing_tables: list[str] = None
+    preview_data: dict, filename: str, existing_tables: list[str] = None, user_id: int = None
 ) -> tuple[dict, dict | None]:
     """
     Generates metadata (table name, description, column descriptions) using LLM.
     
+    Args:
+        preview_data: Preview data of the dataset
+        filename: Original filename
+        existing_tables: List of existing table names to avoid conflicts
+        user_id: User ID to get appropriate LLM credentials
+    
     Returns:
         Tuple of (metadata_dict, usage_metadata) where usage_metadata may be None
     """
+    # Get LLM for this user (uses cached instance if available)
+    user_llm = get_llm_for_user(user_id)
+    
     # Create prompt
     preview_str = json.dumps(preview_data["preview"], indent=2)
     min_preview = preview_str[:2000]  # Truncate if too long
@@ -613,7 +668,7 @@ def generate_table_metadata(
     """
 
     try:
-        response = llm.invoke(prompt)
+        response = user_llm.invoke(prompt)
         content = response.content.strip()
         
         # Extract usage metadata
@@ -640,6 +695,7 @@ async def stream_question(
     thread_id: str = "1",
     base_url: str = "http://localhost:8000",
     token_logger: callable = None,
+    user_id: int = None,
 ):
     """
     Streams events (tool usage, response tokens) from the agent.
@@ -652,9 +708,22 @@ async def stream_question(
         base_url: Base URL of the server (for chart image URLs).
         token_logger: Optional callback function to log token usage.
                       Signature: token_logger(message_id: str, usage_metadata: dict)
+        user_id: User ID to get appropriate LLM credentials.
     """
 
     config = {"configurable": {"thread_id": thread_id}}
+    
+    # Get LLM for this user (uses cached instance if available)
+    user_llm = get_llm_for_user(user_id)
+    
+    # Create agent executor with user's LLM
+    user_agent_executor = create_agent(
+        user_llm,
+        tools,
+        checkpointer=memory,
+        state_schema=CustomState,
+        system_prompt=SYSTEM_PROMPT
+    )
 
     # Fetch context for selected tables using federated context builder
     context = query_router.build_table_context_federated(selected_tables)
@@ -673,7 +742,7 @@ async def stream_question(
     """
     # print(augmented_question)
     # Use astream_events to get granular updates including tokens
-    async for event in agent_executor.astream_events(
+    async for event in user_agent_executor.astream_events(
         {
             "messages": [("user", augmented_question)],
             "selected_tables": selected_tables,
@@ -744,10 +813,10 @@ async def stream_question(
 
     # After streaming completes, get final state and yield charts if any
     try:
-        final_state = agent_executor.get_state(config)
+        final_state = user_agent_executor.get_state(config)
         charts = final_state.values.get("charts", [])
         if charts:
             yield json.dumps({"type": "charts", "charts": charts}) + "\n"
     except Exception as e:
         print(f"Error retrieving charts from state: {e}")
-    print(agent_executor.get_state(config=config).values.get("messages")[-1])
+    print(user_agent_executor.get_state(config=config).values.get("messages")[-1])

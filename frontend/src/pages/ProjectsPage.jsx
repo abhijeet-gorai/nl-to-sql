@@ -19,6 +19,7 @@ import ProfileMenu from '../components/common/ProfileMenu';
 import TokenBadge from '../components/common/TokenTooltip';
 import MembersPanel from '../components/MembersPanel';
 import ChangePasswordModal from '../components/common/ChangePasswordModal';
+import CredentialsModal from '../components/common/CredentialsModal';
 import './ProjectsPage.css';
 
 const ProjectsPage = () => {
@@ -40,6 +41,7 @@ const ProjectsPage = () => {
 
     const [membersProject, setMembersProject] = useState(null);
     const [showChangePassword, setShowChangePassword] = useState(false);
+    const [showCredentials, setShowCredentials] = useState(false);
 
     const [tokenUsage, setTokenUsage] = useState({});
 
@@ -153,7 +155,10 @@ const ProjectsPage = () => {
                     <button className="icon-btn" onClick={toggleTheme} title="Toggle theme">
                         {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
                     </button>
-                    <ProfileMenu onChangePassword={() => setShowChangePassword(true)} />
+                    <ProfileMenu
+                        onChangePassword={() => setShowChangePassword(true)}
+                        onCredentials={() => setShowCredentials(true)}
+                    />
                 </div>
             </header>
 
@@ -335,6 +340,13 @@ const ProjectsPage = () => {
             {showChangePassword && (
                 <ChangePasswordModal
                     onClose={() => setShowChangePassword(false)}
+                />
+            )}
+
+            {/* Credentials Modal */}
+            {showCredentials && (
+                <CredentialsModal
+                    onClose={() => setShowCredentials(false)}
                 />
             )}
         </div>

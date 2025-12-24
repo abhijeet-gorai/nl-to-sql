@@ -18,6 +18,7 @@ import AnalyzingOverlay from '../components/common/AnalyzingOverlay';
 import ConfirmationModal from '../components/common/ConfirmationModal';
 import MembersPanel from '../components/MembersPanel';
 import ChangePasswordModal from '../components/common/ChangePasswordModal';
+import CredentialsModal from '../components/common/CredentialsModal';
 
 import '../App.css';
 
@@ -64,6 +65,7 @@ const WorkspacePage = () => {
     // Mobile Responsive State
     const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
     const [showChangePassword, setShowChangePassword] = useState(false);
+    const [showCredentials, setShowCredentials] = useState(false);
 
     const initialLoadRef = useRef(false);
 
@@ -654,6 +656,7 @@ const WorkspacePage = () => {
                         onClearChat={() => setIsClearingChat(true)}
                         onShowMembers={() => setShowMembersPanel(true)}
                         onChangePassword={() => setShowChangePassword(true)}
+                        onCredentials={() => setShowCredentials(true)}
                         hasTablesAvailable={tables.length > 0}
                         sessionTokens={sessionTokens}
                     />
@@ -692,6 +695,13 @@ const WorkspacePage = () => {
             {showChangePassword && (
                 <ChangePasswordModal
                     onClose={() => setShowChangePassword(false)}
+                />
+            )}
+
+            {/* Credentials Modal */}
+            {showCredentials && (
+                <CredentialsModal
+                    onClose={() => setShowCredentials(false)}
                 />
             )}
         </div>

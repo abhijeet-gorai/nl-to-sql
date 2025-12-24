@@ -1,9 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { User, LogOut, Key, ChevronDown, X } from 'lucide-react';
+import { User, LogOut, Key, ChevronDown, X, Settings } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import './ProfileMenu.css';
 
-const ProfileMenu = ({ onChangePassword }) => {
+const ProfileMenu = ({ onChangePassword, onCredentials }) => {
     const { user, logout } = useAuth();
     const [isOpen, setIsOpen] = useState(false);
     const menuRef = useRef(null);
@@ -28,6 +28,13 @@ const ProfileMenu = ({ onChangePassword }) => {
         setIsOpen(false);
         if (onChangePassword) {
             onChangePassword();
+        }
+    };
+
+    const handleCredentials = () => {
+        setIsOpen(false);
+        if (onCredentials) {
+            onCredentials();
         }
     };
 
@@ -62,6 +69,10 @@ const ProfileMenu = ({ onChangePassword }) => {
                     <div className="profile-divider" />
 
                     <div className="profile-actions">
+                        <button className="profile-action" onClick={handleCredentials}>
+                            <Settings size={16} />
+                            <span>WatsonX Credentials</span>
+                        </button>
                         <button className="profile-action" onClick={handleChangePassword}>
                             <Key size={16} />
                             <span>Change Password</span>
@@ -78,3 +89,4 @@ const ProfileMenu = ({ onChangePassword }) => {
 };
 
 export default ProfileMenu;
+

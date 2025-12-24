@@ -20,6 +20,7 @@ import query_router
 import auth
 import projects
 import token_usage
+import user_credentials
 from dependencies import (
     require_read_access,
     require_write_access,
@@ -59,6 +60,7 @@ async def startup_event():
     auth.init_users_table()
     projects.init_projects_tables()
     token_usage.init_token_usage_table()
+    user_credentials.init_user_credentials_table()
 
 
 # Include routers
@@ -119,6 +121,12 @@ class ConnectionUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 
+class WatsonXCredentialsRequest(BaseModel):
+    watsonx_api_key: str
+    watsonx_project_id: str
+    watsonx_url: str
+
+
 # ============================================
 # Project-Scoped Table Endpoints
 # ============================================
@@ -144,9 +152,12 @@ async def analyze_file_project(
         try:
             tables = db.get_all_tables(project_id)
             existing_names = [t["table_name"] for t in tables]
+            
+            # Get user_id for per-user LLM credentials
+            user_id = access.get("user", {}).get("id")
 
             ai_metadata, usage_metadata = agent.generate_table_metadata(
-                db_result, file.filename, existing_names
+                db_result, file.filename, existing_names, user_id=user_id
             )
             
             # Log token usage for metadata generation
@@ -628,6 +639,7 @@ async def chat_project(
                 request.thread_id,
                 base_url=base_url,
                 token_logger=token_logger,
+                user_id=user_id,
             ),
             media_type="application/x-ndjson",
         )
@@ -670,6 +682,97 @@ async def get_session_messages(
 ):
     """Get individual message token usage for a session (requires read access)"""
     return token_usage.get_session_messages(session_id, limit)
+
+
+# ============================================
+# User WatsonX Credentials Endpoints
+# ============================================
+
+
+@app.post("/users/credentials/validate")
+async def validate_watsonx_credentials(
+    request: WatsonXCredentialsRequest,
+    current_user: dict = Depends(auth_router.get_current_user),
+):
+    """Validate WatsonX credentials without saving"""
+    is_valid, error = user_credentials.validate_credentials(
+        request.watsonx_api_key,
+        request.watsonx_project_id,
+        request.watsonx_url,
+    )
+    
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=error)
+    
+    return {"valid": True, "message": "Credentials validated successfully"}
+
+
+@app.post("/users/credentials")
+async def save_watsonx_credentials(
+    request: WatsonXCredentialsRequest,
+    current_user: dict = Depends(auth_router.get_current_user),
+):
+    """Save or update user WatsonX credentials (validates first)"""
+    user_id = current_user["id"]
+    
+    # Validate credentials first
+    is_valid, error = user_credentials.validate_credentials(
+        request.watsonx_api_key,
+        request.watsonx_project_id,
+        request.watsonx_url,
+    )
+    
+    if not is_valid:
+        raise HTTPException(status_code=400, detail=f"Invalid credentials: {error}")
+    
+    # Save encrypted credentials
+    success = user_credentials.save_credentials(
+        user_id=user_id,
+        api_key=request.watsonx_api_key,
+        project_id=request.watsonx_project_id,
+        url=request.watsonx_url,
+        is_validated=True,
+    )
+    
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to save credentials")
+    
+    # Invalidate cached LLM for this user
+    agent.invalidate_llm_cache(user_id)
+    
+    return {"message": "Credentials saved successfully"}
+
+
+@app.get("/users/credentials")
+async def get_watsonx_credentials(
+    current_user: dict = Depends(auth_router.get_current_user),
+):
+    """Get current user's WatsonX credentials (masked API key)"""
+    user_id = current_user["id"]
+    
+    creds = user_credentials.get_masked_credentials(user_id)
+    
+    if not creds:
+        return {"has_credentials": False}
+    
+    return creds
+
+
+@app.delete("/users/credentials")
+async def delete_watsonx_credentials(
+    current_user: dict = Depends(auth_router.get_current_user),
+):
+    """Delete current user's WatsonX credentials"""
+    user_id = current_user["id"]
+    
+    deleted = user_credentials.delete_credentials(user_id)
+    
+    if deleted:
+        # Invalidate cached LLM for this user
+        agent.invalidate_llm_cache(user_id)
+        return {"message": "Credentials deleted successfully"}
+    
+    return {"message": "No credentials to delete"}
 
 
 # ============================================

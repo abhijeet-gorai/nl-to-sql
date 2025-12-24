@@ -114,6 +114,7 @@ const ChatInterface = ({
     onClearChat,
     onShowMembers,
     onChangePassword,
+    onCredentials,
     hasTablesAvailable,
     sessionTokens
 }) => {
@@ -160,7 +161,7 @@ const ChatInterface = ({
                     >
                         <RotateCcw size={18} />
                     </button>
-                    <ProfileMenu onChangePassword={onChangePassword} />
+                    <ProfileMenu onChangePassword={onChangePassword} onCredentials={onCredentials} />
                 </div>
             </div>
 
