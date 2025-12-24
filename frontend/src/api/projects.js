@@ -99,3 +99,24 @@ export const removeMember = async (projectId, userId) => {
     const response = await apiClient.delete(`/projects/${projectId}/members/${userId}`);
     return response.data;
 };
+
+/**
+ * Get project token usage
+ * @param {number} projectId
+ * @returns {Promise<Object>} - { prompt_tokens, completion_tokens, total_tokens, message_count, session_count, breakdown }
+ */
+export const getProjectTokenUsage = async (projectId) => {
+    const response = await apiClient.get(`/projects/${projectId}/token-usage`);
+    return response.data;
+};
+
+/**
+ * Get session token usage
+ * @param {number} projectId
+ * @param {string} sessionId
+ * @returns {Promise<Object>} - { prompt_tokens, completion_tokens, total_tokens, message_count, current_session_tokens }
+ */
+export const getSessionTokenUsage = async (projectId, sessionId) => {
+    const response = await apiClient.get(`/projects/${projectId}/sessions/${sessionId}/token-usage`);
+    return response.data;
+};

@@ -19,6 +19,7 @@ import metadata_extractor as me
 import query_router
 import auth
 import projects
+import token_usage
 from dependencies import (
     require_read_access,
     require_write_access,
@@ -57,6 +58,7 @@ async def startup_event():
     cm.init_connections_table()
     auth.init_users_table()
     projects.init_projects_tables()
+    token_usage.init_token_usage_table()
 
 
 # Include routers
@@ -143,9 +145,23 @@ async def analyze_file_project(
             tables = db.get_all_tables(project_id)
             existing_names = [t["table_name"] for t in tables]
 
-            ai_metadata = agent.generate_table_metadata(
+            ai_metadata, usage_metadata = agent.generate_table_metadata(
                 db_result, file.filename, existing_names
             )
+            
+            # Log token usage for metadata generation
+            if usage_metadata:
+                user_id = access.get("user", {}).get("id")
+                if user_id:
+                    message_id = token_usage.generate_message_id()
+                    token_usage.log_token_usage(
+                        project_id=project_id,
+                        session_id=f"metadata_{file.filename}",
+                        message_id=message_id,
+                        user_id=user_id,
+                        source="metadata_generation",
+                        usage_metadata=usage_metadata,
+                    )
 
             db_result["suggested_table_name"] = ai_metadata.get(
                 "table_name", db_result["suggested_table_name"]
@@ -591,12 +607,27 @@ async def chat_project(
         # Extract base URL from the incoming request
         base_url = str(http_request.base_url).rstrip("/")
 
+        # Create token logger callback
+        user_id = access.get("user", {}).get("id")
+        
+        def token_logger(message_id: str, usage_metadata: dict):
+            if user_id:
+                token_usage.log_token_usage(
+                    project_id=project_id,
+                    session_id=request.thread_id,
+                    message_id=message_id,
+                    user_id=user_id,
+                    source="chat",
+                    usage_metadata=usage_metadata,
+                )
+
         return StreamingResponse(
             agent.stream_question(
                 request.message,
                 request.selected_tables,
                 request.thread_id,
                 base_url=base_url,
+                token_logger=token_logger,
             ),
             media_type="application/x-ndjson",
         )
@@ -604,6 +635,41 @@ async def chat_project(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================
+# Token Usage Endpoints
+# ============================================
+
+
+@app.get("/projects/{project_id}/token-usage")
+async def get_project_token_usage(
+    project_id: int,
+    access: dict = Depends(require_read_access),
+):
+    """Get total token usage for a project (requires read access)"""
+    return token_usage.get_project_token_usage(project_id)
+
+
+@app.get("/projects/{project_id}/sessions/{session_id}/token-usage")
+async def get_session_token_usage(
+    project_id: int,
+    session_id: str,
+    access: dict = Depends(require_read_access),
+):
+    """Get token usage for a specific session (requires read access)"""
+    return token_usage.get_session_token_usage(session_id)
+
+
+@app.get("/projects/{project_id}/sessions/{session_id}/messages")
+async def get_session_messages(
+    project_id: int,
+    session_id: str,
+    limit: int = 100,
+    access: dict = Depends(require_read_access),
+):
+    """Get individual message token usage for a session (requires read access)"""
+    return token_usage.get_session_messages(session_id, limit)
 
 
 # ============================================

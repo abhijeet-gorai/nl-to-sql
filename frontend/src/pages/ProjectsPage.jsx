@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { useProject } from '../context/ProjectContext';
+import { getProjectTokenUsage } from '../api/projects';
 import {
     FolderKanban,
     Plus,
@@ -10,10 +11,12 @@ import {
     Moon,
     Loader,
     ChevronRight,
-    Trash2
+    Trash2,
+    Coins
 } from 'lucide-react';
 import ConfirmationModal from '../components/common/ConfirmationModal';
 import ProfileMenu from '../components/common/ProfileMenu';
+import TokenBadge from '../components/common/TokenTooltip';
 import MembersPanel from '../components/MembersPanel';
 import ChangePasswordModal from '../components/common/ChangePasswordModal';
 import './ProjectsPage.css';
@@ -38,6 +41,8 @@ const ProjectsPage = () => {
     const [membersProject, setMembersProject] = useState(null);
     const [showChangePassword, setShowChangePassword] = useState(false);
 
+    const [tokenUsage, setTokenUsage] = useState({});
+
     useEffect(() => {
         document.documentElement.setAttribute('data-theme', theme);
         localStorage.setItem('theme', theme);
@@ -46,6 +51,24 @@ const ProjectsPage = () => {
     useEffect(() => {
         refreshProjects();
     }, [refreshProjects]);
+
+    // Fetch token usage for each project
+    useEffect(() => {
+        const fetchTokenUsage = async () => {
+            const usage = {};
+            for (const project of projects) {
+                try {
+                    usage[project.id] = await getProjectTokenUsage(project.id);
+                } catch (err) {
+                    usage[project.id] = null;
+                }
+            }
+            setTokenUsage(usage);
+        };
+        if (projects.length > 0) {
+            fetchTokenUsage();
+        }
+    }, [projects]);
 
     const toggleTheme = () => {
         setTheme(prev => prev === 'dark' ? 'light' : 'dark');
@@ -110,6 +133,13 @@ const ProjectsPage = () => {
             case 'read': return 'badge-read';
             default: return '';
         }
+    };
+
+    const formatTokenCount = (count) => {
+        if (count === undefined || count === null) return '-';
+        if (count >= 1000000) return (count / 1000000).toFixed(1) + 'M';
+        if (count >= 1000) return (count / 1000).toFixed(1) + 'K';
+        return count.toString();
     };
 
     return (
@@ -177,9 +207,17 @@ const ProjectsPage = () => {
                                     <p className="project-description">{project.description}</p>
                                 )}
                                 <div className="project-card-footer">
-                                    <div className="project-meta">
-                                        <Users size={14} />
-                                        <span>{project.member_count || 1} member{(project.member_count || 1) !== 1 ? 's' : ''}</span>
+                                    <div className="project-meta-row">
+                                        <div className="project-meta">
+                                            <Users size={14} />
+                                            <span>{project.member_count || 1} member{(project.member_count || 1) !== 1 ? 's' : ''}</span>
+                                        </div>
+                                        {tokenUsage[project.id] && (
+                                            <TokenBadge data={tokenUsage[project.id]} type="project" position="top">
+                                                <Coins size={14} />
+                                                <span>{formatTokenCount(tokenUsage[project.id].total_tokens)} tokens</span>
+                                            </TokenBadge>
+                                        )}
                                     </div>
                                     <div className="project-actions">
                                         {project.role === 'admin' && (

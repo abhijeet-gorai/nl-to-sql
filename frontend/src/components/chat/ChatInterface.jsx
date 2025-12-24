@@ -2,11 +2,12 @@ import React, { useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
-import { Send, Sparkles, RotateCcw, User, Cpu, Database, Users, Upload, Link, Table } from 'lucide-react';
+import { Send, Sparkles, RotateCcw, User, Cpu, Database, Users, Upload, Link, Table, Coins } from 'lucide-react';
 
 import ReasoningAccordion from './ReasoningAccordion';
 import VegaChartRenderer from './VegaChartRenderer';
 import ProfileMenu from '../common/ProfileMenu';
+import TokenBadge from '../common/TokenTooltip';
 import '../common/EmptyState.css'; // Reuse empty state styles
 
 // Helper function to render content with inline charts
@@ -23,7 +24,7 @@ const renderContentWithCharts = (content, charts) => {
 
     // Track which charts have been referenced
     const referencedCharts = new Set();
-    
+
     // Split content by [CHART:n] markers
     const parts = [];
     let lastIndex = 0;
@@ -32,7 +33,7 @@ const renderContentWithCharts = (content, charts) => {
 
     while ((match = chartRegex.exec(content)) !== null) {
         const chartIndex = parseInt(match[1], 10);
-        
+
         // Add text before the marker
         if (match.index > lastIndex) {
             parts.push({
@@ -40,7 +41,7 @@ const renderContentWithCharts = (content, charts) => {
                 content: content.substring(lastIndex, match.index)
             });
         }
-        
+
         // Add chart if it exists
         if (chartIndex < charts.length) {
             parts.push({
@@ -50,10 +51,10 @@ const renderContentWithCharts = (content, charts) => {
             });
             referencedCharts.add(chartIndex);
         }
-        
+
         lastIndex = match.index + match[0].length;
     }
-    
+
     // Add remaining text
     if (lastIndex < content.length) {
         parts.push({
@@ -61,7 +62,7 @@ const renderContentWithCharts = (content, charts) => {
             content: content.substring(lastIndex)
         });
     }
-    
+
     // Find unreferenced charts
     const unreferencedCharts = charts
         .map((spec, idx) => ({ spec, idx }))
@@ -113,7 +114,8 @@ const ChatInterface = ({
     onClearChat,
     onShowMembers,
     onChangePassword,
-    hasTablesAvailable
+    hasTablesAvailable,
+    sessionTokens
 }) => {
     const messagesEndRef = useRef(null);
 
@@ -131,6 +133,12 @@ const ChatInterface = ({
                     <span>Data Assistant</span>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                    {sessionTokens && (
+                        <TokenBadge data={sessionTokens} type="session" position="bottom">
+                            <Coins size={14} />
+                            <span>{sessionTokens.current_session_tokens?.toLocaleString() || 0}</span>
+                        </TokenBadge>
+                    )}
                     <div className="chat-badge">
                         {selectedTables.length} Contexts Active
                     </div>

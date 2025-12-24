@@ -6,6 +6,7 @@ import { useAuth } from '../context/AuthContext';
 import { useProject } from '../context/ProjectContext';
 import * as tablesApi from '../api/tables';
 import { sendChatMessage } from '../api/chat';
+import { getSessionTokenUsage } from '../api/projects';
 
 // Components
 import ConnectionManager from '../components/ConnectionManager';
@@ -49,6 +50,7 @@ const WorkspacePage = () => {
     const [projectLoading, setProjectLoading] = useState(true);
 
     const [threadId, setThreadId] = useState("default");
+    const [sessionTokens, setSessionTokens] = useState(null);
 
     // Modal State
     const [deleteConfirm, setDeleteConfirm] = useState({ isOpen: false, tableName: '' });
@@ -103,6 +105,25 @@ const WorkspacePage = () => {
             fetchTables();
         }
     }, [currentProject, projectLoading]);
+
+    // Fetch session token usage 1 second after streaming completes
+    useEffect(() => {
+        // Only fetch when loading just finished (went from true to false)
+        if (loading || !currentProject || !threadId || messages.length === 0) {
+            return;
+        }
+
+        const timer = setTimeout(async () => {
+            try {
+                const usage = await getSessionTokenUsage(currentProject.id, threadId);
+                setSessionTokens(usage);
+            } catch (err) {
+                console.error('Failed to fetch session tokens:', err);
+            }
+        }, 1000);
+
+        return () => clearTimeout(timer);
+    }, [loading, currentProject, threadId]);
 
 
     // --- Actions ---
@@ -512,6 +533,7 @@ const WorkspacePage = () => {
     const confirmClearChat = () => {
         setMessages([]);
         setThreadId(Math.random().toString(36).substring(7));
+        setSessionTokens(null);
         setIsClearingChat(false);
     };
 
@@ -633,6 +655,7 @@ const WorkspacePage = () => {
                         onShowMembers={() => setShowMembersPanel(true)}
                         onChangePassword={() => setShowChangePassword(true)}
                         hasTablesAvailable={tables.length > 0}
+                        sessionTokens={sessionTokens}
                     />
                 )}
 

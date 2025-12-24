@@ -250,6 +250,13 @@
     border-top: 1px solid var(--border-color);
 }
 
+.project-meta-row {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+
 .project-meta {
     display: flex;
     align-items: center;

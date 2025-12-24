@@ -1,0 +1,26 @@
+/* Token Tooltip Styles */
+.token-tooltip-content {
+    min-width: 180px;
+}
+
+.token-badge-display {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.75rem;
+    /* padding: 0.25rem 0.6rem; */
+    border-radius: 999px;
+    background: rgba(var(--accent-primary-rgb), 0.1);
+    color: var(--accent-primary);
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.token-badge-display:hover {
+    background: rgba(var(--accent-primary-rgb), 0.2);
+}
+
+.tooltip-value.highlight {
+    color: var(--accent-primary);
+}

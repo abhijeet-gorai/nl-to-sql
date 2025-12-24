@@ -577,9 +577,12 @@ agent_executor = create_agent(
 
 def generate_table_metadata(
     preview_data: dict, filename: str, existing_tables: list[str] = None
-) -> dict:
+) -> tuple[dict, dict | None]:
     """
     Generates metadata (table name, description, column descriptions) using LLM.
+    
+    Returns:
+        Tuple of (metadata_dict, usage_metadata) where usage_metadata may be None
     """
     # Create prompt
     preview_str = json.dumps(preview_data["preview"], indent=2)
@@ -612,10 +615,15 @@ def generate_table_metadata(
     try:
         response = llm.invoke(prompt)
         content = response.content.strip()
+        
+        # Extract usage metadata
+        usage_metadata = None
+        if hasattr(response, "usage_metadata") and response.usage_metadata:
+            usage_metadata = dict(response.usage_metadata)
 
         metadata = JsonOutputParser().parse(content)
         print("Metadata generation succeeded", metadata)
-        return metadata
+        return metadata, usage_metadata
     except Exception as e:
         print(f"Metadata generation failed: {e}")
         # Fallback to defaults
@@ -623,7 +631,7 @@ def generate_table_metadata(
             "table_name": db.generate_table_name(filename),
             "description": f"Dataset imported from {filename}",
             "columns": [],
-        }
+        }, None
 
 
 async def stream_question(
@@ -631,6 +639,7 @@ async def stream_question(
     selected_tables: list[dict],
     thread_id: str = "1",
     base_url: str = "http://localhost:8000",
+    token_logger: callable = None,
 ):
     """
     Streams events (tool usage, response tokens) from the agent.
@@ -641,6 +650,8 @@ async def stream_question(
         selected_tables: List of table configurations to query.
         thread_id: Thread ID for conversation context.
         base_url: Base URL of the server (for chart image URLs).
+        token_logger: Optional callback function to log token usage.
+                      Signature: token_logger(message_id: str, usage_metadata: dict)
     """
 
     config = {"configurable": {"thread_id": thread_id}}
@@ -673,6 +684,23 @@ async def stream_question(
         version="v1",
     ):
         kind = event["event"]
+        # Log token usage for each AI message completion
+        if kind == "on_chat_model_end" and token_logger:
+            try:
+                output = event.get("data", {}).get("output")
+                # Navigate to the message object in generations
+                if output and "generations" in output and output["generations"]:
+                    generation = output["generations"][0][0] if output["generations"][0] else None
+                    if generation and "message" in generation:
+                        message = generation["message"]
+                        if hasattr(message, "usage_metadata") and message.usage_metadata:
+                            # Use AIMessage's id if available, otherwise generate UUID
+                            message_id = getattr(message, "id", None)
+                            if not message_id:
+                                message_id = str(uuid.uuid4())
+                            token_logger(message_id, dict(message.usage_metadata))
+            except Exception as e:
+                print(f"Failed to log token usage: {e}")
 
         # Stream Tokens
         if kind == "on_chat_model_stream":
