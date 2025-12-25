@@ -27,4 +27,12 @@ dependencies = [
     "passlib[argon2,bcrypt]>=1.7.4",
     "python-jose[cryptography]>=3.5.0",
     "email-validator>=2.0.0",
+    "langgraph-checkpoint-sqlite>=3.0.1",
+    "aiosqlite<0.22.0",
+]
+
+[dependency-groups]
+dev = [
+    "ipykernel>=7.1.0",
+    "jupyter>=1.1.1",
 ]
