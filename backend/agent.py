@@ -1,4 +1,4 @@
-from langchain_ibm import ChatWatsonx
+from langchain_groq import ChatGroq
 from langchain.tools import tool, ToolRuntime
 from langchain.agents import AgentState, create_agent
 from langchain.messages import ToolMessage
@@ -32,7 +32,7 @@ class CustomState(AgentState):
 # LLM Caching System
 # ============================================
 
-# In-memory cache: {user_id: {"llm": ChatWatsonx, "credentials_hash": str}}
+# In-memory cache: {user_id: {"llm": ChatGroq, "credentials_hash": str}}
 # "default" key for default credentials from .env
 _llm_cache = {}
 
@@ -43,9 +43,9 @@ def invalidate_llm_cache(user_id: int):
         del _llm_cache[user_id]
 
 
-async def get_llm_for_user(user_id: int = None) -> ChatWatsonx:
+async def get_llm_for_user(user_id: int = None) -> ChatGroq:
     """
-    Returns a cached ChatWatsonx instance with appropriate credentials.
+    Returns a cached ChatGroq instance with appropriate credentials.
     Uses user credentials if available, otherwise falls back to default.
     """
     if user_id:
@@ -59,12 +59,11 @@ async def get_llm_for_user(user_id: int = None) -> ChatWatsonx:
                 return cached["llm"]
 
             # Create new and cache
-            llm = ChatWatsonx(
-                model_id="openai/gpt-oss-120b",
-                url=creds["watsonx_url"],
-                project_id=creds["watsonx_project_id"],
-                apikey=creds["watsonx_api_key"],
-                params={"temperature": 0, "max_tokens": 4000},
+            llm = ChatGroq(
+                model="openai/gpt-oss-120b",
+                api_key=creds["groq_api_key"],
+                temperature=0,
+                max_tokens=4000,
             )
             _llm_cache[user_id] = {"llm": llm, "credentials_hash": creds_hash}
             return llm
@@ -73,11 +72,11 @@ async def get_llm_for_user(user_id: int = None) -> ChatWatsonx:
     if "default" in _llm_cache:
         return _llm_cache["default"]["llm"]
 
-    default_llm = ChatWatsonx(
-        model_id="openai/gpt-oss-120b",
-        url=os.getenv("WATSONX_URL", "https://us-south.ml.cloud.ibm.com"),
-        project_id=os.getenv("WATSONX_PROJECT_ID"),
-        params={"temperature": 0, "max_tokens": 4000},
+    default_llm = ChatGroq(
+        model="openai/gpt-oss-120b",
+        api_key=os.getenv("GROQ_API_KEY"),
+        temperature=0,
+        max_tokens=4000,
     )
     _llm_cache["default"] = {"llm": default_llm, "credentials_hash": "default"}
     return default_llm
@@ -131,11 +130,11 @@ def get_default_llm():
     """Get default LLM synchronously for module-level initialization."""
     if "default" in _llm_cache:
         return _llm_cache["default"]["llm"]
-    default_llm = ChatWatsonx(
-        model_id="openai/gpt-oss-120b",
-        url=os.getenv("WATSONX_URL", "https://us-south.ml.cloud.ibm.com"),
-        project_id=os.getenv("WATSONX_PROJECT_ID"),
-        params={"temperature": 0, "max_tokens": 4000},
+    default_llm = ChatGroq(
+        model="openai/gpt-oss-120b",
+        api_key=os.getenv("GROQ_API_KEY"),
+        temperature=0,
+        max_tokens=4000,
     )
     _llm_cache["default"] = {"llm": default_llm, "credentials_hash": "default"}
     return default_llm
@@ -587,8 +586,8 @@ tools = [
 
 # Validate that we have the necessary credentials
 def validate_creds():
-    if not os.getenv("WATSONX_APIKEY") or not os.getenv("WATSONX_PROJECT_ID"):
-        print("WARNING: Watsonx credentials not found in environment variables.")
+    if not os.getenv("GROQ_APIKEY"):
+        print("WARNING: Groq credentials not found in environment variables.")
 
 
 validate_creds()

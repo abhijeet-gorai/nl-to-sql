@@ -1,13 +1,12 @@
 """
 User Credentials Module
-Handles secure storage and retrieval of user-provided WatsonX credentials
+Handles secure storage and retrieval of user-provided Groq credentials
 """
 
 import os
 import hashlib
 from typing import Optional, Dict
 from cryptography.fernet import Fernet, InvalidToken
-import asyncpg
 
 from database_config import get_connection, execute, fetchrow
 
@@ -26,13 +25,12 @@ def _get_fernet() -> Fernet:
 async def init_user_credentials_table():
     """Initialize the user_credentials table in the database."""
     async with get_connection() as conn:
+        # Drop old table if exists and recreate with new schema
         await conn.execute("""
             CREATE TABLE IF NOT EXISTS user_credentials (
                 id SERIAL PRIMARY KEY,
                 user_id INTEGER UNIQUE NOT NULL,
-                watsonx_api_key_encrypted TEXT NOT NULL,
-                watsonx_project_id TEXT NOT NULL,
-                watsonx_url TEXT NOT NULL,
+                groq_api_key_encrypted TEXT NOT NULL,
                 is_validated BOOLEAN DEFAULT FALSE,
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
                 updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
@@ -66,8 +64,6 @@ def mask_api_key(api_key: str) -> str:
 async def save_credentials(
     user_id: int,
     api_key: str,
-    project_id: str,
-    url: str,
     is_validated: bool = False
 ) -> bool:
     """
@@ -84,16 +80,14 @@ async def save_credentials(
             await conn.execute(
                 """
                 INSERT INTO user_credentials 
-                (user_id, watsonx_api_key_encrypted, watsonx_project_id, watsonx_url, is_validated, updated_at)
-                VALUES ($1, $2, $3, $4, $5, NOW())
+                (user_id, groq_api_key_encrypted, is_validated, updated_at)
+                VALUES ($1, $2, $3, NOW())
                 ON CONFLICT (user_id) DO UPDATE SET
-                    watsonx_api_key_encrypted = EXCLUDED.watsonx_api_key_encrypted,
-                    watsonx_project_id = EXCLUDED.watsonx_project_id,
-                    watsonx_url = EXCLUDED.watsonx_url,
+                    groq_api_key_encrypted = EXCLUDED.groq_api_key_encrypted,
                     is_validated = EXCLUDED.is_validated,
                     updated_at = NOW()
                 """,
-                user_id, encrypted_key, project_id, url, is_validated
+                user_id, encrypted_key, is_validated
             )
 
         return True
@@ -105,12 +99,12 @@ async def save_credentials(
 async def get_credentials(user_id: int) -> Optional[Dict]:
     """
     Get decrypted credentials for a user.
-    Returns dict with watsonx_api_key, watsonx_project_id, watsonx_url.
+    Returns dict with groq_api_key.
     Returns None if user has no credentials.
     """
     row = await fetchrow(
         """
-        SELECT watsonx_api_key_encrypted, watsonx_project_id, watsonx_url, is_validated
+        SELECT groq_api_key_encrypted, is_validated
         FROM user_credentials
         WHERE user_id = $1
         """,
@@ -121,11 +115,9 @@ async def get_credentials(user_id: int) -> Optional[Dict]:
         return None
 
     try:
-        decrypted_key = decrypt_api_key(row["watsonx_api_key_encrypted"])
+        decrypted_key = decrypt_api_key(row["groq_api_key_encrypted"])
         return {
-            "watsonx_api_key": decrypted_key,
-            "watsonx_project_id": row["watsonx_project_id"],
-            "watsonx_url": row["watsonx_url"],
+            "groq_api_key": decrypted_key,
             "is_validated": bool(row["is_validated"]),
         }
     except ValueError:
@@ -140,7 +132,7 @@ async def get_masked_credentials(user_id: int) -> Optional[Dict]:
     """
     row = await fetchrow(
         """
-        SELECT watsonx_api_key_encrypted, watsonx_project_id, watsonx_url, is_validated
+        SELECT groq_api_key_encrypted, is_validated
         FROM user_credentials
         WHERE user_id = $1
         """,
@@ -151,12 +143,10 @@ async def get_masked_credentials(user_id: int) -> Optional[Dict]:
         return None
 
     try:
-        decrypted_key = decrypt_api_key(row["watsonx_api_key_encrypted"])
+        decrypted_key = decrypt_api_key(row["groq_api_key_encrypted"])
         return {
             "has_credentials": True,
-            "watsonx_api_key_masked": mask_api_key(decrypted_key),
-            "watsonx_project_id": row["watsonx_project_id"],
-            "watsonx_url": row["watsonx_url"],
+            "groq_api_key_masked": mask_api_key(decrypted_key),
             "is_validated": bool(row["is_validated"]),
         }
     except ValueError:
@@ -175,22 +165,21 @@ async def delete_credentials(user_id: int) -> bool:
     return "DELETE" in result
 
 
-def validate_credentials(api_key: str, project_id: str, url: str) -> tuple[bool, str]:
+def validate_credentials(api_key: str) -> tuple[bool, str]:
     """
-    Validate WatsonX credentials by attempting to create a client.
+    Validate Groq credentials by attempting to create a client.
     
     Returns (is_valid, error_message).
     """
     try:
-        from langchain_ibm import ChatWatsonx
+        from langchain_groq import ChatGroq
         
-        # Create a minimal ChatWatsonx instance to verify credentials
-        llm = ChatWatsonx(
-            model_id="openai/gpt-oss-120b",
-            url=url,
-            project_id=project_id,
-            apikey=api_key,
-            params={"temperature": 0, "max_tokens": 10},
+        # Create a minimal ChatGroq instance to verify credentials
+        llm = ChatGroq(
+            model="openai/gpt-oss-120b",
+            api_key=api_key,
+            temperature=0,
+            max_tokens=10,
         )
         
         # Try a simple invoke to verify the credentials work
@@ -200,12 +189,10 @@ def validate_credentials(api_key: str, project_id: str, url: str) -> tuple[bool,
     except Exception as e:
         error_msg = str(e)
         # Clean up error message for user
-        if "401" in error_msg or "Unauthorized" in error_msg.lower():
+        if "401" in error_msg or "Unauthorized" in error_msg.lower() or "invalid" in error_msg.lower():
             return False, "Invalid API key"
-        elif "404" in error_msg or "not found" in error_msg.lower():
-            return False, "Invalid project ID or URL"
         elif "connection" in error_msg.lower():
-            return False, "Could not connect to WatsonX URL"
+            return False, "Could not connect to Groq API"
         else:
             return False, f"Validation failed: {error_msg[:100]}"
 
@@ -219,5 +206,6 @@ async def get_credentials_hash(user_id: int) -> Optional[str]:
     if not creds:
         return None
     
-    key = f"{creds['watsonx_url']}:{creds['watsonx_project_id']}"
+    # Hash the API key (only field now)
+    key = creds['groq_api_key'][:8]  # Use first 8 chars for hash
     return hashlib.md5(key.encode()).hexdigest()

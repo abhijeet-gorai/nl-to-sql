@@ -135,10 +135,8 @@ class ConnectionUpdate(BaseModel):
     is_active: Optional[bool] = None
 
 
-class WatsonXCredentialsRequest(BaseModel):
-    watsonx_api_key: str
-    watsonx_project_id: str
-    watsonx_url: str
+class GroqCredentialsRequest(BaseModel):
+    groq_api_key: str
 
 
 # ============================================
@@ -762,20 +760,18 @@ async def delete_chat_session(
 
 
 # ============================================
-# User WatsonX Credentials Endpoints
+# User Groq Credentials Endpoints
 # ============================================
 
 
 @app.post("/users/credentials/validate")
-async def validate_watsonx_credentials(
-    request: WatsonXCredentialsRequest,
+async def validate_groq_credentials(
+    request: GroqCredentialsRequest,
     current_user: dict = Depends(auth_router.get_current_user),
 ):
-    """Validate WatsonX credentials without saving"""
+    """Validate Groq credentials without saving"""
     is_valid, error = user_credentials.validate_credentials(
-        request.watsonx_api_key,
-        request.watsonx_project_id,
-        request.watsonx_url,
+        request.groq_api_key,
     )
     
     if not is_valid:
@@ -785,18 +781,16 @@ async def validate_watsonx_credentials(
 
 
 @app.post("/users/credentials")
-async def save_watsonx_credentials(
-    request: WatsonXCredentialsRequest,
+async def save_groq_credentials(
+    request: GroqCredentialsRequest,
     current_user: dict = Depends(auth_router.get_current_user),
 ):
-    """Save or update user WatsonX credentials (validates first)"""
+    """Save or update user Groq credentials (validates first)"""
     user_id = current_user["id"]
     
     # Validate credentials first
     is_valid, error = user_credentials.validate_credentials(
-        request.watsonx_api_key,
-        request.watsonx_project_id,
-        request.watsonx_url,
+        request.groq_api_key,
     )
     
     if not is_valid:
@@ -805,9 +799,7 @@ async def save_watsonx_credentials(
     # Save encrypted credentials
     success = await user_credentials.save_credentials(
         user_id=user_id,
-        api_key=request.watsonx_api_key,
-        project_id=request.watsonx_project_id,
-        url=request.watsonx_url,
+        api_key=request.groq_api_key,
         is_validated=True,
     )
     
@@ -821,10 +813,10 @@ async def save_watsonx_credentials(
 
 
 @app.get("/users/credentials")
-async def get_watsonx_credentials(
+async def get_groq_credentials(
     current_user: dict = Depends(auth_router.get_current_user),
 ):
-    """Get current user's WatsonX credentials (masked API key)"""
+    """Get current user's Groq credentials (masked API key)"""
     user_id = current_user["id"]
     
     creds = await user_credentials.get_masked_credentials(user_id)
@@ -836,10 +828,10 @@ async def get_watsonx_credentials(
 
 
 @app.delete("/users/credentials")
-async def delete_watsonx_credentials(
+async def delete_groq_credentials(
     current_user: dict = Depends(auth_router.get_current_user),
 ):
-    """Delete current user's WatsonX credentials"""
+    """Delete current user's Groq credentials"""
     user_id = current_user["id"]
     
     deleted = await user_credentials.delete_credentials(user_id)

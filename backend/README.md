@@ -1,46 +1,67 @@
 # DataTalk Backend
 
-The backend engine for DataTalk, built with FastAPI and LangChain. It handles data ingestion, database management, and the AI agent orchestration for NL-to-SQL tasks.
+The backend engine for DataTalk, built with FastAPI and LangChain. It handles data ingestion, database management, user authentication, and AI agent orchestration for NL-to-SQL tasks.
 
 ## 🧠 Core Components
 
 ### 1. API Server (`main.py`)
-*   **`/analyze`**: Uploads CSV, infers schema, and uses AI to suggest metadata (table name, descriptions).
-*   **`/register`**: Finalizes data import, creating the SQLite table and storing metadata.
-*   **`/chat`**: Streaming endpoint that accepts user messages and returns AI thoughts (tokens) and final answers.
-*   **`/tables`**: CRUD operations for managing dataset metadata.
-*   **Static Serving**: Serves generated charts from the `/charts` directory.
+*   **Authentication**: `/auth/*` - Register, login, email verification, password management
+*   **Projects**: `/projects/*` - CRUD operations with member management and role-based access
+*   **Tables**: `/projects/{id}/tables/*` - CSV upload, metadata editing, table management
+*   **Connections**: `/projects/{id}/connections/*` - External database connection management
+*   **Chat**: `/projects/{id}/chat` - Streaming NL-to-SQL responses with tool execution
+*   **Sessions**: Chat history with AI-generated titles
+*   **Token Usage**: LLM token consumption tracking per session/project
 
 ### 2. AI Agent (`agent.py`)
-*   Uses **LangGraph** to create a ReAct-style agent.
-*   **LLM**: Integrates with IBM Watsonx.ai (e.g., `openai/gpt-oss-120b`).
+*   Uses **LangGraph** to create a ReAct-style agent with checkpointing
+*   **LLM**: Integrates with Groq API (`openai/gpt-oss-120b`)
 *   **Tools**:
-    *   `execute_query`: Runs read-only SQL SELECT queries.
-    *   `generate_chart`: Creates standard charts (Bar, Line, Pie, Scatter).
-    *   `generate_custom_chart`: Executes sandboxed Python code for complex Matplotlib visualizations.
+    *   `execute_query`: Runs SQL SELECT queries against selected tables
+    *   `generate_chart_frontend`: Creates interactive Vega-Lite chart specs
+    *   `generate_custom_chart_frontend`: Complex multi-series Vega-Lite visualizations
+    *   `generate_chart` / `generate_custom_chart`: Legacy Matplotlib charts (fallback)
 
-### 3. Database Manager (`db.py`)
-*   Manages the internal **SQLite** database (`database.db`).
-*   Maintains a special `app_metadata` table to store rich context about user tables.
-*   Handles CSV parsing and raw data retrieval for the visualization tools.
+### 3. Database Layer
+*   **`database_config.py`**: Async PostgreSQL connection pool (asyncpg)
+*   **`db.py`**: CSV table management and metadata storage
+*   **`query_router.py`**: Federated query routing (CSV + external databases)
+*   **`connection_manager.py`**: External database connection CRUD with encrypted credentials
+
+### 4. Authentication (`auth.py`)
+*   JWT token-based authentication
+*   Password hashing with Argon2/bcrypt
+*   Email verification flow
 
 ## 🚀 Setup & Run
 
-1.  **Install Dependencies**
-    Note: You must have **uv** installed (`pip install uv` or see [astral.sh/uv](https://docs.astral.sh/uv/getting-started/installation)).
+1.  **Install Dependencies** (requires [uv](https://docs.astral.sh/uv/))
     ```bash
     uv sync
-    # Activate venv
-    # Windows: .venv\Scripts\activate
-    # Linux/Mac: source .venv/bin/activate
+    source .venv/bin/activate
     ```
 
-2.  **Environment Variables**
-    Create a `.env` file:
+2.  **Environment Variables** - Create `.env`:
     ```env
-    WATSONX_APIKEY=...
-    WATSONX_PROJECT_ID=...
-    WATSONX_URL=...
+    # PostgreSQL Connection
+    PGHOST=localhost
+    PGPORT=5432
+    PGDATABASE=nl_to_sql
+    PGUSER=postgres
+    PGPASSWORD=your_password
+    
+    # Groq API
+    GROQ_API_KEY=gsk_...
+    
+    # Security Keys (generate with Fernet.generate_key())
+    JWT_SECRET_KEY=your_secret
+    CREDENTIAL_ENCRYPTION_KEY=your_fernet_key
+    DB_ENCRYPTION_KEY=your_fernet_key
+    
+    # Email
+    GMAIL_APP_PASSWORD=your_gmail_app_password
+    GMAIL_EMAIL_ID=your_gmail_email_id
+    FRONTEND_URL=the_url_of_your_frontend(http://localhost:5173)
     ```
 
 3.  **Start Server**
@@ -50,4 +71,8 @@ The backend engine for DataTalk, built with FastAPI and LangChain. It handles da
 
 ## 📊 Visualization
 
-The backend includes a specialized logic to handle charts. When an agent generates a chart, it saves the image to `backend/charts/` and returns a Markdown link (e.g., `![Chart](/charts/uuid.png)`). The frontend renders this directly.
+The backend supports two chart generation modes:
+
+1. **Frontend Charts (Preferred)**: Returns Vega-Lite JSON specs that render interactively in the browser with tooltips, zoom/pan, and export functionality.
+
+2. **Legacy Charts**: Generates Matplotlib PNG images saved to `backend/charts/` for fallback scenarios.

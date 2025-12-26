@@ -1,46 +1,53 @@
 # DataTalk: Natural Language to SQL & Visualization
 
-DataTalk is a modern, full-stack application that empowers users to interact with their data using natural language. Upload CSV files, let the AI analyze and structure them into a database, and then simply ask questions to get answers, SQL queries, and beautiful visualizations.
+DataTalk is a modern, full-stack application that empowers users to interact with their data using natural language. Upload CSV files or connect to external databases, let the AI analyze and structure them, and then simply ask questions to get answers, SQL queries, and beautiful interactive visualizations.
 
 ## 🚀 Key Features
 
 *   **Smart Data Import**: Upload CSVs with automatic schema inference. The AI proactively scans the file to suggest table names, descriptions, and column metadata.
+*   **External Database Connections**: Connect to PostgreSQL, MySQL, IBM Db2, and Oracle databases. Browse schemas and sync table metadata.
+*   **Multi-Project Workspaces**: Create isolated projects with their own tables, connections, and chat history. Invite team members with role-based access (Owner, Editor, Viewer).
 *   **Metadata Editor**: Review and refine the AI's suggestions before committing your data. Edit table names, descriptions, and column details at any time.
-*   **Context-Aware Chat**: Select multiple tables to query simultaneously. The AI understands the relationships between your data.
-*   **NL-to-SQL Engine**: Powered by Watsonx (Granite/GPT models), converting complex English questions into precise SQLite queries.
+*   **Context-Aware Chat**: Select tables from multiple sources (CSV or external databases) to query simultaneously.
+*   **NL-to-SQL Engine**: Powered by Groq LLM, converting complex English questions into precise SQL queries.
 *   **Rich Visualizations**:
-    *   **Standard Charts**: Automatically generates Bar, Line, Pie, and Scatter plots.
-    *   **Custom Python Charts**: The AI can write and execute custom Python (Matplotlib) code for complex visualizations on the fly.
+    *   **Interactive Vega-Lite Charts**: Bar, Line, Area, Scatter plots with tooltips, zoom, pan, and export.
+    *   **Custom Python Charts**: The AI can write and execute Matplotlib code for complex visualizations.
+*   **User Authentication**: Secure login with email verification, password management, and per-user API credentials.
+*   **Chat History**: Persistent chat sessions with AI-generated titles for easy navigation.
+*   **Token Usage Tracking**: Monitor LLM token consumption per project, session, and message.
 *   **Interactive UI**: A premium, glassmorphism-inspired interface with Dark/Light mode support.
-*   **Session Management**: Reset chat history or delete tables with secure confirmation modals.
 
 ## 🛠 Tech Stack
 
 ### Backend
-*   **Framework**: FastAPI
-*   **Database**: SQLite
-*   **AI/LLM**: LangChain, LangGraph, IBM Watsonx.ai
-*   **Data Processing**: Pandas, Matplotlib
+*   **Framework**: FastAPI (async)
+*   **Database**: PostgreSQL (asyncpg)
+*   **AI/LLM**: LangChain, LangGraph, Groq API
+*   **Data Processing**: Pandas, Matplotlib, SQLAlchemy
+*   **Auth**: JWT tokens, Argon2/bcrypt password hashing
 
 ### Frontend
 *   **Framework**: React (Vite)
 *   **Styling**: Vanilla CSS (Variables, Glassmorphism)
+*   **Charts**: Vega-Lite (react-vega)
 *   **Icons**: Lucide React
-*   **Markdown**: React Markdown, Remark GFM
+*   **Markdown**: React Markdown with syntax highlighting
 
 ## 🏁 Getting Started
 
 ### Prerequisites
-*   Node.js (v16+)
-*   Python (v3.9+)
-*   **uv** (Python package manager). If not installed:
+*   Node.js (v18+)
+*   Python (v3.12+)
+*   PostgreSQL database
+*   **uv** (Python package manager):
     ```bash
-    # Windows (PowerShell)
-    powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
     # macOS / Linux
     curl -LsSf https://astral.sh/uv/install.sh | sh
+    # Windows (PowerShell)
+    powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
     ```
-*   IBM Watsonx Credentials (`WATSONX_APIKEY`, `WATSONX_PROJECT_ID`, `WATSONX_URL`)
+*   Groq API Key (get from [console.groq.com/keys](https://console.groq.com/keys))
 
 ### Installation
 
@@ -53,20 +60,31 @@ DataTalk is a modern, full-stack application that empowers users to interact wit
 2.  **Backend Setup**
     ```bash
     cd backend
-    # This creates the virtual environment and installs dependencies
     uv sync
-    
-    # Activate the virtual environment
-    # Windows:
-    .venv\Scripts\activate
-    # Mac/Linux:
-    source .venv/bin/activate
+    source .venv/bin/activate  # or .venv\Scripts\activate on Windows
     ```
-    *Create a `.env` file in `backend/` with your credentials:*
+    
+    Create a `.env` file in `backend/`:
     ```env
-    WATSONX_APIKEY=your_api_key
-    WATSONX_PROJECT_ID=your_project_id
-    WATSONX_URL=your_url
+    # PostgreSQL
+    PGHOST=localhost
+    PGPORT=5432
+    PGDATABASE=nl_to_sql
+    PGUSER=postgres
+    PGPASSWORD=your_password
+    
+    # Groq LLM
+    GROQ_API_KEY=gsk_your_api_key
+    
+    # Security
+    JWT_SECRET_KEY=your_jwt_secret
+    CREDENTIAL_ENCRYPTION_KEY=your_fernet_key
+    DB_ENCRYPTION_KEY=your_fernet_key
+    
+    # Email
+    GMAIL_APP_PASSWORD=your_gmail_app_password
+    GMAIL_EMAIL_ID=your_gmail_email_id
+    FRONTEND_URL=the_url_of_your_frontend(http://localhost:5173)
     ```
 
 3.  **Frontend Setup**
@@ -77,31 +95,38 @@ DataTalk is a modern, full-stack application that empowers users to interact wit
 
 ### Running the Application
 
-1.  **Start Backend** (from `backend/` dir)
+1.  **Start Backend** (from `backend/`)
     ```bash
-    # Ensure venv is active
     uvicorn main:app --reload --env-file .env
     ```
-    Server will start at `http://localhost:8000`
+    Server starts at `http://localhost:8000`
 
-2.  **Start Frontend** (from `frontend/` dir)
+2.  **Start Frontend** (from `frontend/`)
     ```bash
     npm run dev
     ```
-    Client will start at `http://localhost:5173`
+    Client starts at `http://localhost:5173`
 
 ## 📂 Project Structure
 
 ```
 nl-to-sql/
-├── backend/            # FastAPI server & AI logic
-│   ├── agent.py        # LangChain agent & tools
-│   ├── db.py           # Database & CSV handling
-│   ├── main.py         # API Endpoints
-│   └── charts/         # Generated visualizations
-├── frontend/           # React application
-│   ├── src/
-│   │   ├── App.jsx     # Main UI Logic
-│   │   └── index.css   # Global Styles
-└── sample_data/        # Sample CSVs for testing
+├── backend/
+│   ├── agent.py              # LangGraph agent & tools
+│   ├── db.py                 # CSV table management
+│   ├── main.py               # API endpoints
+│   ├── auth.py               # User authentication
+│   ├── projects.py           # Project & member management
+│   ├── connection_manager.py # External DB connections
+│   ├── metadata_extractor.py # External table sync
+│   ├── query_router.py       # Federated query routing
+│   ├── database_config.py    # PostgreSQL async pool
+│   └── charts/               # Generated visualizations
+├── frontend/
+│   └── src/
+│       ├── pages/            # Page components
+│       ├── components/       # UI components
+│       ├── api/              # API client
+│       └── context/          # React context providers
+└── sample_data/              # Sample CSVs for testing
 ```

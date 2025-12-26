@@ -71,7 +71,7 @@ const ProfileMenu = ({ onChangePassword, onCredentials }) => {
                     <div className="profile-actions">
                         <button className="profile-action" onClick={handleCredentials}>
                             <Settings size={16} />
-                            <span>WatsonX Credentials</span>
+                            <span>Groq Credentials</span>
                         </button>
                         <button className="profile-action" onClick={handleChangePassword}>
                             <Key size={16} />

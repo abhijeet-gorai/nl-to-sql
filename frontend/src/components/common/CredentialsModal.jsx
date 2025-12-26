@@ -5,9 +5,7 @@ import './CredentialsModal.css';
 
 const CredentialsModal = ({ onClose }) => {
     const [credentials, setCredentials] = useState({
-        watsonx_api_key: '',
-        watsonx_project_id: '',
-        watsonx_url: 'https://us-south.ml.cloud.ibm.com'
+        groq_api_key: ''
     });
     const [existingCredentials, setExistingCredentials] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -27,11 +25,6 @@ const CredentialsModal = ({ onClose }) => {
             const response = await apiClient.get('/users/credentials');
             if (response.data.has_credentials) {
                 setExistingCredentials(response.data);
-                setCredentials(prev => ({
-                    ...prev,
-                    watsonx_project_id: response.data.watsonx_project_id,
-                    watsonx_url: response.data.watsonx_url
-                }));
             }
         } catch (err) {
             console.error('Failed to fetch credentials:', err);
@@ -49,8 +42,8 @@ const CredentialsModal = ({ onClose }) => {
     };
 
     const handleValidate = async () => {
-        if (!credentials.watsonx_api_key || !credentials.watsonx_project_id || !credentials.watsonx_url) {
-            setError('All fields are required');
+        if (!credentials.groq_api_key) {
+            setError('API key is required');
             return;
         }
 
@@ -91,7 +84,7 @@ const CredentialsModal = ({ onClose }) => {
     };
 
     const handleDelete = async () => {
-        if (!window.confirm('Are you sure you want to delete your WatsonX credentials?')) {
+        if (!window.confirm('Are you sure you want to delete your Groq credentials?')) {
             return;
         }
 
@@ -102,9 +95,7 @@ const CredentialsModal = ({ onClose }) => {
             await apiClient.delete('/users/credentials');
             setExistingCredentials(null);
             setCredentials({
-                watsonx_api_key: '',
-                watsonx_project_id: '',
-                watsonx_url: 'https://us-south.ml.cloud.ibm.com'
+                groq_api_key: ''
             });
             setSuccess('Credentials deleted successfully!');
         } catch (err) {
@@ -133,7 +124,7 @@ const CredentialsModal = ({ onClose }) => {
                 <div className="modal-header">
                     <div className="modal-title">
                         <Key size={20} />
-                        <span>WatsonX Credentials</span>
+                        <span>Groq API Credentials</span>
                     </div>
                     <button className="close-btn" onClick={onClose}>
                         <X size={20} />
@@ -147,45 +138,24 @@ const CredentialsModal = ({ onClose }) => {
                                 You have saved credentials. Enter a new API key to update them.
                             </p>
                             <div className="masked-key">
-                                Current API Key: <code>{existingCredentials.watsonx_api_key_masked}</code>
+                                Current API Key: <code>{existingCredentials.groq_api_key_masked}</code>
                             </div>
                         </div>
                     )}
 
                     <div className="form-group">
-                        <label htmlFor="watsonx_api_key">API Key *</label>
+                        <label htmlFor="groq_api_key">Groq API Key *</label>
                         <input
                             type="password"
-                            id="watsonx_api_key"
-                            name="watsonx_api_key"
-                            value={credentials.watsonx_api_key}
+                            id="groq_api_key"
+                            name="groq_api_key"
+                            value={credentials.groq_api_key}
                             onChange={handleChange}
-                            placeholder={existingCredentials ? "Enter new API key to update" : "Enter your WatsonX API key"}
+                            placeholder={existingCredentials ? "Enter new API key to update" : "gsk_..."}
                         />
-                    </div>
-
-                    <div className="form-group">
-                        <label htmlFor="watsonx_project_id">Project ID *</label>
-                        <input
-                            type="text"
-                            id="watsonx_project_id"
-                            name="watsonx_project_id"
-                            value={credentials.watsonx_project_id}
-                            onChange={handleChange}
-                            placeholder="xxxx-xxxx-xxxx-xxxx"
-                        />
-                    </div>
-
-                    <div className="form-group">
-                        <label htmlFor="watsonx_url">WatsonX URL *</label>
-                        <input
-                            type="text"
-                            id="watsonx_url"
-                            name="watsonx_url"
-                            value={credentials.watsonx_url}
-                            onChange={handleChange}
-                            placeholder="https://us-south.ml.cloud.ibm.com"
-                        />
+                        <small className="help-text">
+                            Get your API key from <a href="https://console.groq.com/keys" target="_blank" rel="noopener noreferrer">console.groq.com/keys</a>
+                        </small>
                     </div>
 
                     {error && (
@@ -219,7 +189,7 @@ const CredentialsModal = ({ onClose }) => {
                         <button
                             className="btn btn-secondary"
                             onClick={handleValidate}
-                            disabled={validating || !credentials.watsonx_api_key}
+                            disabled={validating || !credentials.groq_api_key}
                         >
                             {validating ? <Loader className="spin" size={16} /> : <Check size={16} />}
                             <span>{validating ? 'Validating...' : 'Test Connection'}</span>
