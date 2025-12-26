@@ -27,8 +27,10 @@ dependencies = [
     "passlib[argon2,bcrypt]>=1.7.4",
     "python-jose[cryptography]>=3.5.0",
     "email-validator>=2.0.0",
-    "langgraph-checkpoint-sqlite>=3.0.1",
-    "aiosqlite<0.22.0",
+    # PostgreSQL support
+    "langgraph-checkpoint-postgres>=3.0.2",
+    "asyncpg>=0.31.0",
+    "psycopg[binary,pool]>=3.3.2",
 ]
 
 [dependency-groups]

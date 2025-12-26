@@ -3,47 +3,41 @@ Token Usage Module
 Handles tracking and querying of LLM token consumption
 """
 
-import sqlite3
-from typing import Optional, Dict, List
+from typing import Dict, List
 import uuid
 
-DB_PATH = "database.db"
+from database_config import get_connection, execute, fetch, fetchrow
 
 
-def init_token_usage_table():
+async def init_token_usage_table():
     """Initialize the token_usage table"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
+    async with get_connection() as conn:
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS token_usage (
+                id SERIAL PRIMARY KEY,
+                project_id INTEGER NOT NULL,
+                session_id TEXT NOT NULL,
+                message_id TEXT NOT NULL,
+                user_id INTEGER NOT NULL,
+                source TEXT NOT NULL,
+                prompt_tokens INTEGER DEFAULT 0,
+                completion_tokens INTEGER DEFAULT 0,
+                total_tokens INTEGER DEFAULT 0,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                FOREIGN KEY (project_id) REFERENCES projects(id),
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+        """)
 
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS token_usage (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            project_id INTEGER NOT NULL,
-            session_id TEXT NOT NULL,
-            message_id TEXT NOT NULL,
-            user_id INTEGER NOT NULL,
-            source TEXT NOT NULL,
-            prompt_tokens INTEGER DEFAULT 0,
-            completion_tokens INTEGER DEFAULT 0,
-            total_tokens INTEGER DEFAULT 0,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (project_id) REFERENCES projects(id),
-            FOREIGN KEY (user_id) REFERENCES users(id)
-        )
-    """)
-
-    # Create indexes for common queries
-    cursor.execute("""
-        CREATE INDEX IF NOT EXISTS idx_token_usage_session 
-        ON token_usage(session_id)
-    """)
-    cursor.execute("""
-        CREATE INDEX IF NOT EXISTS idx_token_usage_project 
-        ON token_usage(project_id)
-    """)
-
-    conn.commit()
-    conn.close()
+        # Create indexes for common queries
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_token_usage_session 
+            ON token_usage(session_id)
+        """)
+        await conn.execute("""
+            CREATE INDEX IF NOT EXISTS idx_token_usage_project 
+            ON token_usage(project_id)
+        """)
 
 
 def generate_message_id() -> str:
@@ -51,7 +45,7 @@ def generate_message_id() -> str:
     return str(uuid.uuid4())
 
 
-def log_token_usage(
+async def log_token_usage(
     project_id: int,
     session_id: str,
     message_id: str,
@@ -76,34 +70,28 @@ def log_token_usage(
     if not usage_metadata:
         return False
 
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
     try:
         # Handle different key names for token counts
         prompt_tokens = usage_metadata.get("input_tokens", 0) or usage_metadata.get("prompt_tokens", 0)
         completion_tokens = usage_metadata.get("output_tokens", 0) or usage_metadata.get("completion_tokens", 0)
         total_tokens = usage_metadata.get("total_tokens", 0) or (prompt_tokens + completion_tokens)
 
-        cursor.execute(
+        await execute(
             """
             INSERT INTO token_usage 
             (project_id, session_id, message_id, user_id, source, prompt_tokens, completion_tokens, total_tokens)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
             """,
-            (project_id, session_id, message_id, user_id, source, prompt_tokens, completion_tokens, total_tokens),
+            project_id, session_id, message_id, user_id, source, prompt_tokens, completion_tokens, total_tokens
         )
 
-        conn.commit()
         return True
     except Exception as e:
         print(f"Failed to log token usage: {e}")
         return False
-    finally:
-        conn.close()
 
 
-def get_session_token_usage(session_id: str) -> Dict:
+async def get_session_token_usage(session_id: str) -> Dict:
     """
     Get total token usage for a session.
     
@@ -111,11 +99,8 @@ def get_session_token_usage(session_id: str) -> Dict:
         Dict with prompt_tokens, completion_tokens, total_tokens, message_count,
         and current_session_tokens (total_tokens from the last AIMessage)
     """
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
     # Get aggregate totals
-    cursor.execute(
+    row = await fetchrow(
         """
         SELECT 
             COALESCE(SUM(prompt_tokens), 0) as prompt_tokens,
@@ -123,41 +108,36 @@ def get_session_token_usage(session_id: str) -> Dict:
             COALESCE(SUM(total_tokens), 0) as total_tokens,
             COUNT(*) as message_count
         FROM token_usage
-        WHERE session_id = ?
+        WHERE session_id = $1
         """,
-        (session_id,),
+        session_id
     )
-
-    row = cursor.fetchone()
     
     # Get total_tokens from the last message (current session context size)
-    cursor.execute(
+    last_message = await fetchrow(
         """
         SELECT total_tokens
         FROM token_usage
-        WHERE session_id = ?
+        WHERE session_id = $1
         ORDER BY created_at DESC
         LIMIT 1
         """,
-        (session_id,),
+        session_id
     )
     
-    last_message = cursor.fetchone()
-    current_session_tokens = last_message[0] if last_message else 0
-    
-    conn.close()
+    current_session_tokens = last_message["total_tokens"] if last_message else 0
 
     return {
         "session_id": session_id,
-        "prompt_tokens": row[0],
-        "completion_tokens": row[1],
-        "total_tokens": row[2],
-        "message_count": row[3],
+        "prompt_tokens": row["prompt_tokens"],
+        "completion_tokens": row["completion_tokens"],
+        "total_tokens": row["total_tokens"],
+        "message_count": row["message_count"],
         "current_session_tokens": current_session_tokens,
     }
 
 
-def get_project_token_usage(project_id: int) -> Dict:
+async def get_project_token_usage(project_id: int) -> Dict:
     """
     Get total token usage for a project (all sessions + metadata generation).
     
@@ -165,11 +145,8 @@ def get_project_token_usage(project_id: int) -> Dict:
         Dict with prompt_tokens, completion_tokens, total_tokens, 
         message_count, session_count, breakdown by source
     """
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
     # Overall totals
-    cursor.execute(
+    row = await fetchrow(
         """
         SELECT 
             COALESCE(SUM(prompt_tokens), 0) as prompt_tokens,
@@ -178,36 +155,33 @@ def get_project_token_usage(project_id: int) -> Dict:
             COUNT(*) as message_count,
             COUNT(DISTINCT session_id) as session_count
         FROM token_usage
-        WHERE project_id = ?
+        WHERE project_id = $1
         """,
-        (project_id,),
+        project_id
     )
 
-    row = cursor.fetchone()
-
     # Breakdown by source
-    cursor.execute(
+    breakdown_rows = await fetch(
         """
         SELECT 
             source,
             COALESCE(SUM(total_tokens), 0) as total_tokens
         FROM token_usage
-        WHERE project_id = ?
+        WHERE project_id = $1
         GROUP BY source
         """,
-        (project_id,),
+        project_id
     )
 
-    breakdown = {r[0]: r[1] for r in cursor.fetchall()}
-    conn.close()
+    breakdown = {r["source"]: r["total_tokens"] for r in breakdown_rows}
 
     return {
         "project_id": project_id,
-        "prompt_tokens": row[0],
-        "completion_tokens": row[1],
-        "total_tokens": row[2],
-        "message_count": row[3],
-        "session_count": row[4],
+        "prompt_tokens": row["prompt_tokens"],
+        "completion_tokens": row["completion_tokens"],
+        "total_tokens": row["total_tokens"],
+        "message_count": row["message_count"],
+        "session_count": row["session_count"],
         "breakdown": {
             "chat": breakdown.get("chat", 0),
             "metadata_generation": breakdown.get("metadata_generation", 0),
@@ -215,18 +189,14 @@ def get_project_token_usage(project_id: int) -> Dict:
     }
 
 
-def get_session_messages(session_id: str, limit: int = 100) -> List[Dict]:
+async def get_session_messages(session_id: str, limit: int = 100) -> List[Dict]:
     """
     Get individual message token usage for a session.
     
     Returns:
         List of message usage records
     """
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-
-    cursor.execute(
+    rows = await fetch(
         """
         SELECT 
             message_id,
@@ -236,14 +206,11 @@ def get_session_messages(session_id: str, limit: int = 100) -> List[Dict]:
             total_tokens,
             created_at
         FROM token_usage
-        WHERE session_id = ?
+        WHERE session_id = $1
         ORDER BY created_at DESC
-        LIMIT ?
+        LIMIT $2
         """,
-        (session_id, limit),
+        session_id, limit
     )
 
-    messages = [dict(row) for row in cursor.fetchall()]
-    conn.close()
-
-    return messages
+    return [dict(row) for row in rows]

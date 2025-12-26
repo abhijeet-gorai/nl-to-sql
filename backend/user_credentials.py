@@ -3,17 +3,18 @@ User Credentials Module
 Handles secure storage and retrieval of user-provided WatsonX credentials
 """
 
-import sqlite3
 import os
 import hashlib
 from typing import Optional, Dict
 from cryptography.fernet import Fernet, InvalidToken
+import asyncpg
 
-DB_PATH = "database.db"
+from database_config import get_connection, execute, fetchrow
 
 # Encryption key from environment variable
 # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ENCRYPTION_KEY = os.getenv("CREDENTIAL_ENCRYPTION_KEY")
+
 
 def _get_fernet() -> Fernet:
     """Get Fernet instance for encryption/decryption."""
@@ -22,27 +23,22 @@ def _get_fernet() -> Fernet:
     return Fernet(ENCRYPTION_KEY.encode())
 
 
-def init_user_credentials_table():
+async def init_user_credentials_table():
     """Initialize the user_credentials table in the database."""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS user_credentials (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER UNIQUE NOT NULL,
-            watsonx_api_key_encrypted TEXT NOT NULL,
-            watsonx_project_id TEXT NOT NULL,
-            watsonx_url TEXT NOT NULL,
-            is_validated BOOLEAN DEFAULT 0,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users(id)
-        )
-    """)
-
-    conn.commit()
-    conn.close()
+    async with get_connection() as conn:
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS user_credentials (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER UNIQUE NOT NULL,
+                watsonx_api_key_encrypted TEXT NOT NULL,
+                watsonx_project_id TEXT NOT NULL,
+                watsonx_url TEXT NOT NULL,
+                is_validated BOOLEAN DEFAULT FALSE,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+        """)
 
 
 def encrypt_api_key(api_key: str) -> str:
@@ -67,7 +63,7 @@ def mask_api_key(api_key: str) -> str:
     return "*" * 8 + api_key[-4:]
 
 
-def save_credentials(
+async def save_credentials(
     user_id: int,
     api_key: str,
     project_id: str,
@@ -80,58 +76,46 @@ def save_credentials(
     
     Returns True on success.
     """
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
     try:
         encrypted_key = encrypt_api_key(api_key)
 
-        # Try update first, then insert
-        cursor.execute(
-            """
-            INSERT INTO user_credentials 
-            (user_id, watsonx_api_key_encrypted, watsonx_project_id, watsonx_url, is_validated, updated_at)
-            VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(user_id) DO UPDATE SET
-                watsonx_api_key_encrypted = excluded.watsonx_api_key_encrypted,
-                watsonx_project_id = excluded.watsonx_project_id,
-                watsonx_url = excluded.watsonx_url,
-                is_validated = excluded.is_validated,
-                updated_at = CURRENT_TIMESTAMP
-            """,
-            (user_id, encrypted_key, project_id, url, is_validated),
-        )
+        async with get_connection() as conn:
+            # PostgreSQL UPSERT syntax
+            await conn.execute(
+                """
+                INSERT INTO user_credentials 
+                (user_id, watsonx_api_key_encrypted, watsonx_project_id, watsonx_url, is_validated, updated_at)
+                VALUES ($1, $2, $3, $4, $5, NOW())
+                ON CONFLICT (user_id) DO UPDATE SET
+                    watsonx_api_key_encrypted = EXCLUDED.watsonx_api_key_encrypted,
+                    watsonx_project_id = EXCLUDED.watsonx_project_id,
+                    watsonx_url = EXCLUDED.watsonx_url,
+                    is_validated = EXCLUDED.is_validated,
+                    updated_at = NOW()
+                """,
+                user_id, encrypted_key, project_id, url, is_validated
+            )
 
-        conn.commit()
         return True
     except Exception as e:
         print(f"Failed to save credentials: {e}")
         return False
-    finally:
-        conn.close()
 
 
-def get_credentials(user_id: int) -> Optional[Dict]:
+async def get_credentials(user_id: int) -> Optional[Dict]:
     """
     Get decrypted credentials for a user.
     Returns dict with watsonx_api_key, watsonx_project_id, watsonx_url.
     Returns None if user has no credentials.
     """
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-
-    cursor.execute(
+    row = await fetchrow(
         """
         SELECT watsonx_api_key_encrypted, watsonx_project_id, watsonx_url, is_validated
         FROM user_credentials
-        WHERE user_id = ?
+        WHERE user_id = $1
         """,
-        (user_id,),
+        user_id
     )
-
-    row = cursor.fetchone()
-    conn.close()
 
     if not row:
         return None
@@ -149,26 +133,19 @@ def get_credentials(user_id: int) -> Optional[Dict]:
         return None
 
 
-def get_masked_credentials(user_id: int) -> Optional[Dict]:
+async def get_masked_credentials(user_id: int) -> Optional[Dict]:
     """
     Get credentials with masked API key (for frontend display).
     Returns None if user has no credentials.
     """
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-
-    cursor.execute(
+    row = await fetchrow(
         """
         SELECT watsonx_api_key_encrypted, watsonx_project_id, watsonx_url, is_validated
         FROM user_credentials
-        WHERE user_id = ?
+        WHERE user_id = $1
         """,
-        (user_id,),
+        user_id
     )
-
-    row = cursor.fetchone()
-    conn.close()
 
     if not row:
         return None
@@ -186,23 +163,16 @@ def get_masked_credentials(user_id: int) -> Optional[Dict]:
         return None
 
 
-def delete_credentials(user_id: int) -> bool:
+async def delete_credentials(user_id: int) -> bool:
     """
     Delete user's credentials.
     Returns True if credentials were deleted, False if none existed.
     """
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    try:
-        cursor.execute(
-            "DELETE FROM user_credentials WHERE user_id = ?",
-            (user_id,),
-        )
-        conn.commit()
-        return cursor.rowcount > 0
-    finally:
-        conn.close()
+    result = await execute(
+        "DELETE FROM user_credentials WHERE user_id = $1",
+        user_id
+    )
+    return "DELETE" in result
 
 
 def validate_credentials(api_key: str, project_id: str, url: str) -> tuple[bool, str]:
@@ -240,12 +210,12 @@ def validate_credentials(api_key: str, project_id: str, url: str) -> tuple[bool,
             return False, f"Validation failed: {error_msg[:100]}"
 
 
-def get_credentials_hash(user_id: int) -> Optional[str]:
+async def get_credentials_hash(user_id: int) -> Optional[str]:
     """
     Get a hash of user's credentials configuration.
     Used for cache invalidation detection.
     """
-    creds = get_credentials(user_id)
+    creds = await get_credentials(user_id)
     if not creds:
         return None
     

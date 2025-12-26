@@ -88,7 +88,7 @@ async def create_project(
     - **description**: Optional project description
     """
     try:
-        project_id = projects.create_project(
+        project_id = await projects.create_project(
             name=request.name,
             description=request.description,
             created_by=current_user["id"],
@@ -112,7 +112,7 @@ async def list_projects(current_user: dict = Depends(get_current_user)):
     """
     List all projects the current user has access to.
     """
-    user_projects = projects.get_user_projects(current_user["id"])
+    user_projects = await projects.get_user_projects(current_user["id"])
 
     return [
         ProjectResponse(
@@ -133,7 +133,8 @@ async def get_project(project_id: int, access: dict = Depends(require_read_acces
     Get project details. Requires at least read access.
     """
     project = access["project"]
-    member_count = len(projects.get_project_members(project_id))
+    members = await projects.get_project_members(project_id)
+    member_count = len(members)
 
     return ProjectResponse(
         id=project["id"],
@@ -155,7 +156,7 @@ async def update_project(
     Update project details. Requires admin access.
     """
     try:
-        success = projects.update_project(
+        success = await projects.update_project(
             project_id=project_id, name=request.name, description=request.description
         )
 
@@ -166,8 +167,9 @@ async def update_project(
             )
 
         # Get updated project
-        project = projects.get_project(project_id)
-        member_count = len(projects.get_project_members(project_id))
+        project = await projects.get_project(project_id)
+        members = await projects.get_project_members(project_id)
+        member_count = len(members)
 
         return ProjectResponse(
             id=project["id"],
@@ -190,7 +192,7 @@ async def delete_project(project_id: int, access: dict = Depends(require_admin_a
     **Warning**: This will permanently delete all connections, tables, and data
     associated with this project.
     """
-    success = projects.delete_project(project_id)
+    success = await projects.delete_project(project_id)
 
     if not success:
         raise HTTPException(
@@ -211,7 +213,7 @@ async def list_members(project_id: int, access: dict = Depends(require_read_acce
     """
     List all members of a project. Requires at least read access.
     """
-    members = projects.get_project_members(project_id)
+    members = await projects.get_project_members(project_id)
 
     return [
         MemberResponse(
@@ -239,9 +241,9 @@ async def add_member(
     - **role**: Role to assign (read, write, or admin)
     """
     # Find user by username or email
-    user = auth.get_user_by_username(request.username_or_email)
+    user = await auth.get_user_by_username(request.username_or_email)
     if not user:
-        user = auth.get_user_by_email(request.username_or_email)
+        user = await auth.get_user_by_email(request.username_or_email)
 
     if not user:
         raise HTTPException(
@@ -249,7 +251,7 @@ async def add_member(
         )
 
     try:
-        projects.add_project_member(
+        await projects.add_project_member(
             project_id=project_id,
             user_id=user["id"],
             role=request.role,
@@ -280,7 +282,7 @@ async def update_member_role(
     - **role**: New role (read, write, or admin)
     """
     try:
-        success = projects.update_member_role(
+        success = await projects.update_member_role(
             project_id=project_id, user_id=user_id, new_role=request.role
         )
 
@@ -306,7 +308,7 @@ async def remove_member(
     Note: Cannot remove the last admin from a project.
     """
     try:
-        success = projects.remove_project_member(project_id=project_id, user_id=user_id)
+        success = await projects.remove_project_member(project_id=project_id, user_id=user_id)
 
         if not success:
             raise HTTPException(

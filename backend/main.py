@@ -2,6 +2,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from database_config import close_pool
+
 from fastapi import FastAPI, UploadFile, File, HTTPException, Depends, Request
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -53,16 +55,26 @@ os.makedirs(CHARTS_DIR, exist_ok=True)
 app.mount("/charts", StaticFiles(directory=CHARTS_DIR), name="charts")
 
 
+import email_service
+
+
 # Initialize DB on startup
 @app.on_event("startup")
 async def startup_event():
-    db.init_db()
-    cm.init_connections_table()
-    auth.init_users_table()
-    projects.init_projects_tables()
-    token_usage.init_token_usage_table()
-    user_credentials.init_user_credentials_table()
-    chat_sessions.init_chat_sessions_table()
+    await auth.init_users_table()
+    await projects.init_projects_tables()
+    await db.init_db()
+    await cm.init_connections_table()
+    await token_usage.init_token_usage_table()
+    await user_credentials.init_user_credentials_table()
+    await chat_sessions.init_chat_sessions_table()
+    await email_service.init_verification_tokens_table()
+
+
+# Cleanup on shutdown
+@app.on_event("shutdown")
+async def shutdown_event():
+    await close_pool()
 
 
 # Include routers
@@ -152,13 +164,13 @@ async def analyze_file_project(
         db_result = db.analyze_csv(temp_filename, file.filename)
 
         try:
-            tables = db.get_all_tables(project_id)
+            tables = await db.get_all_tables(project_id)
             existing_names = [t["table_name"] for t in tables]
             
             # Get user_id for per-user LLM credentials
             user_id = access.get("user", {}).get("id")
 
-            ai_metadata, usage_metadata = agent.generate_table_metadata(
+            ai_metadata, usage_metadata = await agent.generate_table_metadata(
                 db_result, file.filename, existing_names, user_id=user_id
             )
             
@@ -167,7 +179,7 @@ async def analyze_file_project(
                 user_id = access.get("user", {}).get("id")
                 if user_id:
                     message_id = token_usage.generate_message_id()
-                    token_usage.log_token_usage(
+                    await token_usage.log_token_usage(
                         project_id=project_id,
                         session_id=f"metadata_{file.filename}",
                         message_id=message_id,
@@ -192,7 +204,7 @@ async def analyze_file_project(
                     col["description"] = ai_cols[col["name"]]
 
             proposed_name = db_result["suggested_table_name"]
-            if db.check_table_exists(proposed_name, project_id):
+            if await db.check_table_exists(proposed_name, project_id):
                 suffix = db.generate_random_suffix()
                 db_result["suggested_table_name"] = f"{proposed_name}_{suffix}"
 
@@ -214,7 +226,7 @@ async def register_table_project(
 ):
     """Register a table in a project (requires write access)"""
     try:
-        success = db.register_table(request.file_path, request.metadata, project_id)
+        success = await db.register_table(request.file_path, request.metadata, project_id)
 
         if os.path.exists(request.file_path):
             os.remove(request.file_path)
@@ -229,7 +241,7 @@ async def get_project_tables(
     project_id: int, access: dict = Depends(require_read_access)
 ):
     """Get all tables in a project (requires read access)"""
-    return query_router.get_all_available_tables(project_id)
+    return await query_router.get_all_available_tables(project_id)
 
 
 @app.put("/projects/{project_id}/tables/{table_name}")
@@ -245,19 +257,19 @@ async def update_project_table(
     """Update table metadata in a project (requires write access)"""
     try:
         if source_type == "csv":
-            success = db.update_table_metadata(table_name, request.metadata, project_id)
+            success = await db.update_table_metadata(table_name, request.metadata, project_id)
             if not success:
                 raise HTTPException(status_code=404, detail="CSV table not found")
         elif source_type == "external":
-            success = me.update_external_table_metadata(
+            success = await me.update_external_table_metadata(
                 table_name, request.metadata, connection_id=connection_id, schema=schema
             )
             if not success:
                 raise HTTPException(status_code=404, detail="External table not found")
         else:
-            success = db.update_table_metadata(table_name, request.metadata, project_id)
+            success = await db.update_table_metadata(table_name, request.metadata, project_id)
             if not success:
-                success = me.update_external_table_metadata(
+                success = await me.update_external_table_metadata(
                     table_name, request.metadata
                 )
                 if not success:
@@ -282,19 +294,19 @@ async def delete_project_table(
     """Delete a table from a project (requires write access)"""
     try:
         if source_type == "csv":
-            success = db.delete_table(table_name, project_id)
+            success = await db.delete_table(table_name, project_id)
             if not success:
                 raise HTTPException(status_code=404, detail="CSV table not found")
         elif source_type == "external":
-            success = me.delete_external_table_composite(
+            success = await me.delete_external_table_composite(
                 table_name, connection_id=connection_id, schema=schema
             )
             if not success:
                 raise HTTPException(status_code=404, detail="External table not found")
         else:
-            success = db.delete_table(table_name, project_id)
+            success = await db.delete_table(table_name, project_id)
             if not success:
-                success = me.delete_external_table_by_name(table_name)
+                success = await me.delete_external_table_by_name(table_name)
                 if not success:
                     raise HTTPException(status_code=404, detail="Table not found")
 
@@ -318,7 +330,7 @@ async def create_connection_project(
 ):
     """Create a new database connection in a project (requires write access)"""
     try:
-        connection_id = cm.create_connection(connection.dict(), project_id)
+        connection_id = await cm.create_connection(connection.dict(), project_id)
         return {"status": "success", "connection_id": connection_id}
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -329,7 +341,7 @@ async def list_connections_project(
     project_id: int, access: dict = Depends(require_read_access)
 ):
     """List all connections in a project (requires read access)"""
-    return cm.get_all_connections(project_id)
+    return await cm.get_all_connections(project_id)
 
 
 @app.get("/projects/{project_id}/connections/{connection_id}")
@@ -337,7 +349,7 @@ async def get_connection_project(
     project_id: int, connection_id: int, access: dict = Depends(require_read_access)
 ):
     """Get connection details in a project (requires read access)"""
-    connection = cm.get_connection(connection_id)
+    connection = await cm.get_connection_by_id(connection_id)
     if not connection:
         raise HTTPException(status_code=404, detail="Connection not found")
     # Verify connection belongs to this project
@@ -358,14 +370,14 @@ async def update_connection_project(
 ):
     """Update a connection in a project (requires write access)"""
     # Verify connection belongs to this project first
-    connection = cm.get_connection(connection_id)
+    connection = await cm.get_connection_by_id(connection_id)
     if not connection or connection.get("project_id") != project_id:
         raise HTTPException(
             status_code=404, detail="Connection not found in this project"
         )
 
     try:
-        success = cm.update_connection(connection_id, update.dict(exclude_unset=True))
+        success = await cm.update_connection(connection_id, update.dict(exclude_unset=True))
         if not success:
             raise HTTPException(status_code=404, detail="Connection not found")
         return {"status": "success"}
@@ -379,13 +391,13 @@ async def delete_connection_project(
 ):
     """Delete a connection from a project (requires write access)"""
     # Verify connection belongs to this project first
-    connection = cm.get_connection(connection_id)
+    connection = await cm.get_connection_by_id(connection_id)
     if not connection or connection.get("project_id") != project_id:
         raise HTTPException(
             status_code=404, detail="Connection not found in this project"
         )
 
-    success = cm.delete_connection(connection_id)
+    success = await cm.delete_connection(connection_id)
     if not success:
         raise HTTPException(status_code=404, detail="Connection not found")
     return {"status": "success"}
@@ -397,13 +409,13 @@ async def test_connection_project(
 ):
     """Test a database connection (requires write access)"""
     # Verify connection belongs to this project first
-    connection = cm.get_connection(connection_id)
+    connection = await cm.get_connection_by_id(connection_id)
     if not connection or connection.get("project_id") != project_id:
         raise HTTPException(
             status_code=404, detail="Connection not found in this project"
         )
 
-    result = cm.test_connection(connection_id)
+    result = await cm.test_connection(connection_id)
     if not result["success"]:
         raise HTTPException(status_code=400, detail=result["message"])
     return result
@@ -433,14 +445,14 @@ async def list_schemas_project(
 ):
     """List all schemas in a database (requires read access)"""
     # Verify connection belongs to this project
-    connection = cm.get_connection(connection_id)
+    connection = await cm.get_connection_by_id(connection_id)
     if not connection or connection.get("project_id") != project_id:
         raise HTTPException(
             status_code=404, detail="Connection not found in this project"
         )
 
     try:
-        connector = cm.get_connector(connection_id)
+        connector = await cm.get_connector_async(connection_id)
         schemas = connector.get_schemas()
         connector.disconnect()
         return {"schemas": schemas}
@@ -457,14 +469,14 @@ async def list_tables_project(
 ):
     """List all tables in a schema (requires read access)"""
     # Verify connection belongs to this project
-    connection = cm.get_connection(connection_id)
+    connection = await cm.get_connection_by_id(connection_id)
     if not connection or connection.get("project_id") != project_id:
         raise HTTPException(
             status_code=404, detail="Connection not found in this project"
         )
 
     try:
-        tables = me.discover_tables(connection_id, schema)
+        tables = await me.discover_tables(connection_id, schema)
         return {"tables": tables}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -480,14 +492,14 @@ async def get_table_metadata_project(
 ):
     """Get detailed metadata for a table (requires read access)"""
     # Verify connection belongs to this project
-    connection = cm.get_connection(connection_id)
+    connection = await cm.get_connection_by_id(connection_id)
     if not connection or connection.get("project_id") != project_id:
         raise HTTPException(
             status_code=404, detail="Connection not found in this project"
         )
 
     try:
-        metadata = me.extract_table_metadata(connection_id, schema, table_name)
+        metadata = await me.extract_table_metadata(connection_id, schema, table_name)
         return metadata
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -502,18 +514,18 @@ async def sync_tables_project(
 ):
     """Sync tables from external database (requires write access)"""
     # Verify connection belongs to this project
-    connection = cm.get_connection(connection_id)
+    connection = await cm.get_connection_by_id(connection_id)
     if not connection or connection.get("project_id") != project_id:
         raise HTTPException(
             status_code=404, detail="Connection not found in this project"
         )
 
     try:
-        success = me.sync_external_tables(connection_id, request.tables, project_id)
+        success = await me.sync_external_tables(connection_id, request.tables, project_id)
         if not success:
             raise HTTPException(status_code=500, detail="Failed to sync tables")
 
-        synced_tables = me.get_external_tables(connection_id, project_id)
+        synced_tables = await me.get_external_tables(connection_id, project_id)
         synced_table_names = [t["table_name"] for t in request.tables]
         synced_tables = [
             t for t in synced_tables if t["table_name"] in synced_table_names
@@ -541,14 +553,14 @@ async def preview_table_project(
 ):
     """Preview data from a table (requires read access)"""
     # Verify connection belongs to this project
-    connection = cm.get_connection(connection_id)
+    connection = await cm.get_connection_by_id(connection_id)
     if not connection or connection.get("project_id") != project_id:
         raise HTTPException(
             status_code=404, detail="Connection not found in this project"
         )
 
     try:
-        connector = cm.get_connector(connection_id)
+        connector = await cm.get_connector_async(connection_id)
         df = connector.get_sample_data(schema, table_name, limit)
         connector.disconnect()
 
@@ -568,7 +580,7 @@ async def list_external_tables_project(
     access: dict = Depends(require_read_access),
 ):
     """List external tables in a project (requires read access)"""
-    return me.get_external_tables(connection_id, project_id)
+    return await me.get_external_tables(connection_id, project_id)
 
 
 # ============================================
@@ -588,7 +600,7 @@ async def chat_project(
         # Security check: Verify all selected tables belong to this project
         if request.selected_tables:
             # Get all tables available in this project
-            project_tables = query_router.get_all_available_tables(project_id)
+            project_tables = await query_router.get_all_available_tables(project_id)
 
             # Build a set of valid table identifiers (composite key)
             # For CSV: (table_name, "csv", None, None)
@@ -623,24 +635,29 @@ async def chat_project(
         # Create token logger callback
         user_id = access.get("user", {}).get("id")
         
+        import asyncio
+        
         def token_logger(message_id: str, usage_metadata: dict):
             if user_id:
-                token_usage.log_token_usage(
+                # Schedule async task - this works because we're in async context
+                asyncio.create_task(token_usage.log_token_usage(
                     project_id=project_id,
                     session_id=request.thread_id,
                     message_id=message_id,
                     user_id=user_id,
                     source="chat",
                     usage_metadata=usage_metadata,
-                )
+                ))
 
         # Create/update chat session for history
-        chat_sessions.create_or_update_session(
+        print("Creating or updating chat session")
+        await chat_sessions.create_or_update_session(
             project_id=project_id,
             thread_id=request.thread_id,
             user_id=user_id,
             user_message=request.message,
         )
+        print("Chat session created or updated")
 
         return StreamingResponse(
             agent.stream_question(
@@ -670,7 +687,7 @@ async def get_project_token_usage(
     access: dict = Depends(require_read_access),
 ):
     """Get total token usage for a project (requires read access)"""
-    return token_usage.get_project_token_usage(project_id)
+    return await token_usage.get_project_token_usage(project_id)
 
 
 @app.get("/projects/{project_id}/sessions/{session_id}/token-usage")
@@ -680,7 +697,7 @@ async def get_session_token_usage(
     access: dict = Depends(require_read_access),
 ):
     """Get token usage for a specific session (requires read access)"""
-    return token_usage.get_session_token_usage(session_id)
+    return await token_usage.get_session_token_usage(session_id)
 
 
 @app.get("/projects/{project_id}/sessions/{session_id}/messages")
@@ -691,7 +708,7 @@ async def get_session_messages(
     access: dict = Depends(require_read_access),
 ):
     """Get individual message token usage for a session (requires read access)"""
-    return token_usage.get_session_messages(session_id, limit)
+    return await token_usage.get_session_messages(session_id, limit)
 
 
 # ============================================
@@ -705,7 +722,7 @@ async def list_chat_sessions(
     access: dict = Depends(require_read_access),
 ):
     """Get all chat sessions for a project (for chat history)"""
-    return chat_sessions.get_project_sessions(project_id)
+    return await chat_sessions.get_project_sessions(project_id)
 
 
 @app.get("/projects/{project_id}/chat-sessions/{thread_id}")
@@ -716,7 +733,7 @@ async def get_chat_session_messages(
 ):
     """Get messages + charts for a specific chat session"""
     # Verify session belongs to this project
-    session = chat_sessions.get_session(thread_id)
+    session = await chat_sessions.get_session(thread_id)
     if not session or session["project_id"] != project_id:
         raise HTTPException(status_code=404, detail="Session not found")
     
@@ -734,11 +751,11 @@ async def delete_chat_session(
 ):
     """Delete a chat session"""
     # Verify session belongs to this project
-    session = chat_sessions.get_session(thread_id)
+    session = await chat_sessions.get_session(thread_id)
     if not session or session["project_id"] != project_id:
         raise HTTPException(status_code=404, detail="Session not found")
     
-    deleted = chat_sessions.delete_session(thread_id)
+    deleted = await chat_sessions.delete_session(thread_id)
     if deleted:
         return {"message": "Session deleted successfully"}
     return {"message": "Session not found"}
@@ -786,7 +803,7 @@ async def save_watsonx_credentials(
         raise HTTPException(status_code=400, detail=f"Invalid credentials: {error}")
     
     # Save encrypted credentials
-    success = user_credentials.save_credentials(
+    success = await user_credentials.save_credentials(
         user_id=user_id,
         api_key=request.watsonx_api_key,
         project_id=request.watsonx_project_id,
@@ -810,7 +827,7 @@ async def get_watsonx_credentials(
     """Get current user's WatsonX credentials (masked API key)"""
     user_id = current_user["id"]
     
-    creds = user_credentials.get_masked_credentials(user_id)
+    creds = await user_credentials.get_masked_credentials(user_id)
     
     if not creds:
         return {"has_credentials": False}
@@ -825,7 +842,7 @@ async def delete_watsonx_credentials(
     """Delete current user's WatsonX credentials"""
     user_id = current_user["id"]
     
-    deleted = user_credentials.delete_credentials(user_id)
+    deleted = await user_credentials.delete_credentials(user_id)
     
     if deleted:
         # Invalidate cached LLM for this user

@@ -59,7 +59,7 @@ const Sidebar = ({
     // Group tables by source with schema hierarchy for external databases
     const groupedTables = useMemo(() => {
         const groups = {
-            csv: { name: 'Local CSV Files', icon: '📄', isEmoji: true, tables: [] },
+            csv: { name: 'Uploaded CSV Files', icon: '📄', isEmoji: true, tables: [] },
         };
 
         tables.forEach(table => {

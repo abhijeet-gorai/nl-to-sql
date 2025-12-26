@@ -3,16 +3,15 @@ Authentication Module
 Handles user management, password hashing, and JWT token management
 """
 
-import sqlite3
 import os
 from datetime import datetime, timedelta
 from typing import Optional, Dict
 from passlib.context import CryptContext
 from jose import JWTError, jwt
 from pydantic import BaseModel
+import asyncpg
 
-# Database path
-DB_PATH = "database.db"
+from database_config import get_connection, execute, fetch, fetchrow, fetchval
 
 # Password hashing configuration (Argon2)
 pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
@@ -45,27 +44,21 @@ class TokenData(BaseModel):
     user_id: Optional[int] = None
 
 
-def init_users_table():
+async def init_users_table():
     """Initialize the users table in the database"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    cursor.execute("""
+    await execute("""
         CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             username TEXT UNIQUE NOT NULL,
             full_name TEXT NOT NULL,
             email TEXT UNIQUE NOT NULL,
             password_hash TEXT NOT NULL,
-            is_active BOOLEAN DEFAULT 1,
-            is_email_verified BOOLEAN DEFAULT 0,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            is_active BOOLEAN DEFAULT TRUE,
+            is_email_verified BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
         )
     """)
-
-    conn.commit()
-    conn.close()
 
 
 def hash_password(password: str) -> str:
@@ -78,86 +71,58 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     return pwd_context.verify(plain_password, hashed_password)
 
 
-def get_user_by_id(user_id: int) -> Optional[Dict]:
+async def get_user_by_id(user_id: int) -> Optional[Dict]:
     """Get user by ID"""
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-
-    cursor.execute("SELECT * FROM users WHERE id = ?", (user_id,))
-    row = cursor.fetchone()
-    conn.close()
-
+    row = await fetchrow("SELECT * FROM users WHERE id = $1", user_id)
     return dict(row) if row else None
 
 
-def get_user_by_username(username: str) -> Optional[Dict]:
+async def get_user_by_username(username: str) -> Optional[Dict]:
     """Get user by username"""
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-
-    cursor.execute("SELECT * FROM users WHERE username = ?", (username,))
-    row = cursor.fetchone()
-    conn.close()
-
+    row = await fetchrow("SELECT * FROM users WHERE username = $1", username)
     return dict(row) if row else None
 
 
-def get_user_by_email(email: str) -> Optional[Dict]:
+async def get_user_by_email(email: str) -> Optional[Dict]:
     """Get user by email"""
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-
-    cursor.execute("SELECT * FROM users WHERE email = ?", (email,))
-    row = cursor.fetchone()
-    conn.close()
-
+    row = await fetchrow("SELECT * FROM users WHERE email = $1", email)
     return dict(row) if row else None
 
 
-def create_user(username: str, full_name: str, email: str, password: str) -> int:
+async def create_user(username: str, full_name: str, email: str, password: str) -> int:
     """
     Create a new user.
     Returns the user ID on success.
     Raises ValueError if username or email already exists.
     """
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
     try:
         password_hash = hash_password(password)
-
-        cursor.execute(
+        user_id = await fetchval(
             """
             INSERT INTO users (username, full_name, email, password_hash)
-            VALUES (?, ?, ?, ?)
-        """,
-            (username, full_name, email, password_hash),
+            VALUES ($1, $2, $3, $4)
+            RETURNING id
+            """,
+            username, full_name, email, password_hash
         )
-
-        conn.commit()
-        user_id = cursor.lastrowid
         return user_id
 
-    except sqlite3.IntegrityError as e:
-        if "username" in str(e).lower():
+    except asyncpg.UniqueViolationError as e:
+        error_str = str(e).lower()
+        if "username" in error_str:
             raise ValueError(f"Username '{username}' already exists")
-        elif "email" in str(e).lower():
+        elif "email" in error_str:
             raise ValueError(f"Email '{email}' already registered")
         else:
             raise ValueError("User already exists")
-    finally:
-        conn.close()
 
 
-def authenticate_user(username: str, password: str) -> Optional[Dict]:
+async def authenticate_user(username: str, password: str) -> Optional[Dict]:
     """
     Authenticate a user by username and password.
     Returns user dict if valid, None otherwise.
     """
-    user = get_user_by_username(username)
+    user = await get_user_by_username(username)
     if not user:
         return None
 
@@ -200,81 +165,57 @@ def decode_access_token(token: str) -> Optional[TokenData]:
         return None
 
 
-def update_password(user_id: int, old_password: str, new_password: str) -> bool:
+async def update_password(user_id: int, old_password: str, new_password: str) -> bool:
     """
     Update a user's password.
     Returns True on success, raises ValueError if old password is incorrect.
     """
-    user = get_user_by_id(user_id)
+    user = await get_user_by_id(user_id)
     if not user:
         raise ValueError("User not found")
 
     if not verify_password(old_password, user["password_hash"]):
         raise ValueError("Current password is incorrect")
 
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    try:
-        new_hash = hash_password(new_password)
-        cursor.execute(
-            """
-            UPDATE users 
-            SET password_hash = ?, updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
+    new_hash = hash_password(new_password)
+    result = await execute(
+        """
+        UPDATE users 
+        SET password_hash = $1, updated_at = NOW()
+        WHERE id = $2
         """,
-            (new_hash, user_id),
-        )
-
-        conn.commit()
-        return cursor.rowcount > 0
-    finally:
-        conn.close()
+        new_hash, user_id
+    )
+    return "UPDATE" in result
 
 
-def search_users(query: str, limit: int = 10) -> list:
+async def search_users(query: str, limit: int = 10) -> list:
     """
     Search users by username or email.
     Returns list of user dicts (without password hash).
     """
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-
     search_pattern = f"%{query}%"
-    cursor.execute(
+    rows = await fetch(
         """
         SELECT id, username, full_name, email, is_active
         FROM users
-        WHERE (username LIKE ? OR email LIKE ? OR full_name LIKE ?)
-        AND is_active = 1
-        LIMIT ?
-    """,
-        (search_pattern, search_pattern, search_pattern, limit),
-    )
-
-    users = [dict(row) for row in cursor.fetchall()]
-    conn.close()
-
-    return users
-
-
-def deactivate_user(user_id: int) -> bool:
-    """Deactivate a user account"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    try:
-        cursor.execute(
-            """
-            UPDATE users 
-            SET is_active = 0, updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
+        WHERE (username ILIKE $1 OR email ILIKE $1 OR full_name ILIKE $1)
+        AND is_active = TRUE
+        LIMIT $2
         """,
-            (user_id,),
-        )
+        search_pattern, limit
+    )
+    return [dict(row) for row in rows]
 
-        conn.commit()
-        return cursor.rowcount > 0
-    finally:
-        conn.close()
+
+async def deactivate_user(user_id: int) -> bool:
+    """Deactivate a user account"""
+    result = await execute(
+        """
+        UPDATE users 
+        SET is_active = FALSE, updated_at = NOW()
+        WHERE id = $1
+        """,
+        user_id
+    )
+    return "UPDATE" in result

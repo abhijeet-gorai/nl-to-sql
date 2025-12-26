@@ -3,16 +3,15 @@ Query Router Module
 Routes queries to appropriate database based on table source
 """
 
-import sqlite3
 import pandas as pd
 from typing import List, Dict, Optional
 import sqlglot
+import json
 from sqlglot import exp
 
 import connection_manager as cm
 import db
-
-DB_PATH = "database.db"
+from database_config import fetch, fetchrow
 
 
 def parse_query_tables(query: str) -> List[Dict[str, Optional[str]]]:
@@ -71,29 +70,23 @@ def parse_query_tables(query: str) -> List[Dict[str, Optional[str]]]:
     return unique_tables
 
 
-def get_table_source(table_name: str) -> Optional[Dict]:
+async def get_table_source(table_name: str) -> Optional[Dict]:
     """Get source information for a table"""
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-
     # Check if it's a CSV table (in app_metadata)
-    cursor.execute(
+    row = await fetchrow(
         """
         SELECT table_name, 'csv' as source_type, NULL as connection_id, NULL as schema_name
         FROM app_metadata
-        WHERE table_name = ? AND (source_type = 'csv' OR source_type IS NULL)
-    """,
-        (table_name,),
+        WHERE table_name = $1 AND (source_type = 'csv' OR source_type IS NULL)
+        """,
+        table_name
     )
 
-    row = cursor.fetchone()
     if row:
-        conn.close()
         return dict(row)
 
     # Check if it's an external table
-    cursor.execute(
+    row = await fetchrow(
         """
         SELECT 
             et.table_name,
@@ -103,13 +96,10 @@ def get_table_source(table_name: str) -> Optional[Dict]:
             c.db_type
         FROM external_tables et
         JOIN db_connections c ON et.connection_id = c.id
-        WHERE et.display_name = ? OR et.table_name = ?
-    """,
-        (table_name, table_name),
+        WHERE et.display_name = $1 OR et.table_name = $1
+        """,
+        table_name
     )
-
-    row = cursor.fetchone()
-    conn.close()
 
     if row:
         return dict(row)
@@ -250,7 +240,7 @@ def execute_federated_query(query: str, selected_tables: List[Dict]) -> pd.DataF
     first_table = list(table_sources.values())[0]
 
     if first_table["source_type"] == "csv":
-        # Query local SQLite database
+        # Query local PostgreSQL database (CSV tables are stored there)
         return db.get_raw_dataframe(query)
     else:
         # Query external database
@@ -266,7 +256,7 @@ def execute_federated_query(query: str, selected_tables: List[Dict]) -> pd.DataF
             raise Exception(f"Query execution failed: {str(e)}")
 
 
-def build_table_context_federated(table_names: List[str]) -> str:
+async def build_table_context_federated(table_names: List[str]) -> str:
     """Build context string including source information for federated queries"""
     if not table_names:
         return ""
@@ -294,37 +284,31 @@ def build_table_context_federated(table_names: List[str]) -> str:
     # Add CSV tables context
     if csv_tables:
         context += "=== LOCAL CSV TABLES ===\n"
-        context += db.get_table_context(csv_tables)
+        context += await db.get_table_context(csv_tables)
         context += "\n"
 
     # Add external tables context
     for conn_id, tables in external_tables_by_conn.items():
-        conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row
-        cursor = conn.cursor()
-
         # Get connection info
-        cursor.execute(
-            "SELECT connection_name, db_type FROM db_connections WHERE id = ?",
-            (conn_id,),
+        conn_info = await fetchrow(
+            "SELECT connection_name, db_type FROM db_connections WHERE id = $1",
+            conn_id
         )
-        conn_info = cursor.fetchone()
 
         if conn_info:
             context += f"=== EXTERNAL DATABASE: {conn_info['connection_name']} ({conn_info['db_type']}) ===\n"
 
         # Get table metadata
         for table_name in tables:
-            cursor.execute(
+            row = await fetchrow(
                 """
                 SELECT display_name, schema_name, table_name, description, columns_metadata
                 FROM external_tables
-                WHERE connection_id = ? AND (display_name = ? OR table_name = ?)
-            """,
-                (conn_id, table_name, table_name),
+                WHERE connection_id = $1 AND (display_name = $2 OR table_name = $2)
+                """,
+                conn_id, table_name
             )
 
-            row = cursor.fetchone()
             if row:
                 context += f"Table: {row['display_name']}\n"
                 context += f"Schema: {row['schema_name']}\n"
@@ -332,8 +316,6 @@ def build_table_context_federated(table_names: List[str]) -> str:
                 context += "Columns:\n"
 
                 try:
-                    import json
-
                     columns = (
                         json.loads(row["columns_metadata"])
                         if row["columns_metadata"]
@@ -346,66 +328,72 @@ def build_table_context_federated(table_names: List[str]) -> str:
 
                 context += "\n"
 
-        conn.close()
-
     return context
 
 
-def get_all_available_tables(project_id: int = None) -> List[Dict]:
+async def get_all_available_tables(project_id: int = None) -> List[Dict]:
     """Get all available tables (CSV + External) for selection, optionally filtered by project"""
     tables = []
 
     # Get CSV tables
-    csv_tables = db.get_all_tables(project_id)
+    csv_tables = await db.get_all_tables(project_id)
     for table in csv_tables:
         table["source_type"] = "csv"
         table["source_name"] = "Local CSV"
         tables.append(table)
 
     # Get external tables
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-
-    query = """
-        SELECT 
-            et.id,
-            et.display_name as table_name,
-            et.description,
-            et.columns_metadata,
-            et.schema_name,
-            'external' as source_type,
-            c.connection_name as source_name,
-            c.db_type,
-            et.connection_id,
-            et.project_id
-        FROM external_tables et
-        JOIN db_connections c ON et.connection_id = c.id
-        WHERE et.is_selected = 1
-    """
-    params = []
-
     if project_id is not None:
-        query += " AND et.project_id = ?"
-        params.append(project_id)
+        rows = await fetch(
+            """
+            SELECT 
+                et.id,
+                et.display_name as table_name,
+                et.description,
+                et.columns_metadata,
+                et.schema_name,
+                'external' as source_type,
+                c.connection_name as source_name,
+                c.db_type,
+                et.connection_id,
+                et.project_id
+            FROM external_tables et
+            JOIN db_connections c ON et.connection_id = c.id
+            WHERE et.is_selected = TRUE AND et.project_id = $1
+            ORDER BY et.display_name
+            """,
+            project_id
+        )
+    else:
+        rows = await fetch(
+            """
+            SELECT 
+                et.id,
+                et.display_name as table_name,
+                et.description,
+                et.columns_metadata,
+                et.schema_name,
+                'external' as source_type,
+                c.connection_name as source_name,
+                c.db_type,
+                et.connection_id,
+                et.project_id
+            FROM external_tables et
+            JOIN db_connections c ON et.connection_id = c.id
+            WHERE et.is_selected = TRUE
+            ORDER BY et.display_name
+            """
+        )
 
-    query += " ORDER BY et.display_name"
-
-    cursor.execute(query, tuple(params))
-
-    for row in cursor.fetchall():
+    for row in rows:
         table = dict(row)
         # Parse columns
         if table.get("columns_metadata"):
             try:
-                import json
-
                 table["columns"] = json.loads(table["columns_metadata"])
             except:
                 table["columns"] = []
-        del table["columns_metadata"]
+            del table["columns_metadata"]
         tables.append(table)
-
-    conn.close()
 
     return tables

@@ -2,13 +2,14 @@ from langchain_ibm import ChatWatsonx
 from langchain.tools import tool, ToolRuntime
 from langchain.agents import AgentState, create_agent
 from langchain.messages import ToolMessage
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.types import Command
 from langchain_core.output_parsers import JsonOutputParser
 import os
 import db
 import query_router
 import user_credentials
+from database_config import get_connection_string
 from dotenv import load_dotenv
 import matplotlib
 
@@ -42,15 +43,15 @@ def invalidate_llm_cache(user_id: int):
         del _llm_cache[user_id]
 
 
-def get_llm_for_user(user_id: int = None) -> ChatWatsonx:
+async def get_llm_for_user(user_id: int = None) -> ChatWatsonx:
     """
     Returns a cached ChatWatsonx instance with appropriate credentials.
     Uses user credentials if available, otherwise falls back to default.
     """
     if user_id:
-        creds = user_credentials.get_credentials(user_id)
+        creds = await user_credentials.get_credentials(user_id)
         if creds:
-            creds_hash = user_credentials.get_credentials_hash(user_id)
+            creds_hash = await user_credentials.get_credentials_hash(user_id)
             cached = _llm_cache.get(user_id)
 
             # Return cached if credentials haven't changed
@@ -95,13 +96,13 @@ Based only on the user's **first message**, generate a **short, clear, descripti
 Output **only the title**, nothing else."""
 
 
-def generate_chat_title(user_message: str, user_id: int = None) -> str:
+async def generate_chat_title(user_message: str, user_id: int = None) -> str:
     """
     Generate a chat title using LLM based on the first user message.
     Returns a short descriptive title.
     """
     try:
-        user_llm = get_llm_for_user(user_id)
+        user_llm = await get_llm_for_user(user_id)
         
         response = user_llm.invoke([
             ("system", TITLE_GENERATION_PROMPT),
@@ -124,7 +125,22 @@ def generate_chat_title(user_message: str, user_id: int = None) -> str:
 
 
 # Default LLM for backwards compatibility (tools still reference 'llm')
-llm = get_llm_for_user()
+# Note: This must be initialized synchronously at module load
+# For async contexts, use await get_llm_for_user() instead
+def get_default_llm():
+    """Get default LLM synchronously for module-level initialization."""
+    if "default" in _llm_cache:
+        return _llm_cache["default"]["llm"]
+    default_llm = ChatWatsonx(
+        model_id="openai/gpt-oss-120b",
+        url=os.getenv("WATSONX_URL", "https://us-south.ml.cloud.ibm.com"),
+        project_id=os.getenv("WATSONX_PROJECT_ID"),
+        params={"temperature": 0, "max_tokens": 4000},
+    )
+    _llm_cache["default"] = {"llm": default_llm, "credentials_hash": "default"}
+    return default_llm
+
+llm = get_default_llm()
 
 
 @tool
@@ -665,7 +681,7 @@ Remember: Frontend chart tools are your primary choice. They provide better user
 """
 
 
-def generate_table_metadata(
+async def generate_table_metadata(
     preview_data: dict,
     filename: str,
     existing_tables: list[str] = None,
@@ -684,7 +700,7 @@ def generate_table_metadata(
         Tuple of (metadata_dict, usage_metadata) where usage_metadata may be None
     """
     # Get LLM for this user (uses cached instance if available)
-    user_llm = get_llm_for_user(user_id)
+    user_llm = await get_llm_for_user(user_id)
 
     # Create prompt
     preview_str = json.dumps(preview_data["preview"], indent=2)
@@ -761,9 +777,9 @@ async def stream_question(
     config = {"configurable": {"thread_id": thread_id}}
 
     # Get LLM for this user (uses cached instance if available)
-    user_llm = get_llm_for_user(user_id)
+    user_llm = await get_llm_for_user(user_id)
 
-    async with AsyncSqliteSaver.from_conn_string("checkpoint.db") as memory:
+    async with AsyncPostgresSaver.from_conn_string(get_connection_string()) as memory:
         # Create agent executor with user's LLM
         user_agent_executor = create_agent(
             user_llm,
@@ -774,7 +790,7 @@ async def stream_question(
         )
 
         # Fetch context for selected tables using federated context builder
-        context = query_router.build_table_context_federated(selected_tables)
+        context = await query_router.build_table_context_federated(selected_tables)
 
         # Construct augmented prompt
         augmented_question = f"""
@@ -908,7 +924,7 @@ async def get_thread_messages(thread_id: str) -> dict:
     """
     config = {"configurable": {"thread_id": thread_id}}
     
-    async with AsyncSqliteSaver.from_conn_string("checkpoint.db") as memory:
+    async with AsyncPostgresSaver.from_conn_string(get_connection_string()) as memory:
         # Create a minimal agent executor just to access state
         temp_executor = create_agent(
             llm,

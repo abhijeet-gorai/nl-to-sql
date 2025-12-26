@@ -3,7 +3,6 @@ Metadata Extractor Module
 Discovers and enriches metadata from external databases
 """
 
-import sqlite3
 import json
 from typing import List, Dict
 import pandas as pd
@@ -11,14 +10,15 @@ from datetime import datetime, date
 import connection_manager as cm
 import agent
 
-DB_PATH = "database.db"
+from database_config import get_connection, get_transaction, execute, fetch, fetchrow
+
 EXTERNAL_TABLES_TABLE = "external_tables"
 
 
-def discover_tables(connection_id: int, schema: str = None) -> List[Dict]:
+async def discover_tables(connection_id: int, schema: str = None) -> List[Dict]:
     """Discover all tables in a schema"""
     try:
-        connector = cm.get_connector(connection_id)
+        connector = await cm.get_connector_async(connection_id)
 
         # If no schema specified, get first available schema
         if not schema:
@@ -36,10 +36,10 @@ def discover_tables(connection_id: int, schema: str = None) -> List[Dict]:
         raise Exception(f"Failed to discover tables: {str(e)}")
 
 
-def extract_table_metadata(connection_id: int, schema: str, table: str) -> Dict:
+async def extract_table_metadata(connection_id: int, schema: str, table: str) -> Dict:
     """Extract detailed metadata for a specific table"""
     try:
-        connector = cm.get_connector(connection_id)
+        connector = await cm.get_connector_async(connection_id)
         metadata = connector.get_table_metadata(schema, table)
         connector.disconnect()
 
@@ -48,7 +48,7 @@ def extract_table_metadata(connection_id: int, schema: str, table: str) -> Dict:
         raise Exception(f"Failed to extract table metadata: {str(e)}")
 
 
-def enrich_metadata_with_ai(table_metadata: Dict, sample_data: pd.DataFrame) -> Dict:
+async def enrich_metadata_with_ai(table_metadata: Dict, sample_data: pd.DataFrame) -> Dict:
     """Use AI to generate descriptions for table and columns"""
     try:
         preview_df = sample_data.head(5).copy()
@@ -66,9 +66,9 @@ def enrich_metadata_with_ai(table_metadata: Dict, sample_data: pd.DataFrame) -> 
             "columns": table_metadata["columns"],
         }
 
-        # Use existing AI metadata generation
+        # Use existing AI metadata generation (now async)
         table_name = table_metadata["table_name"]
-        enriched = agent.generate_table_metadata(
+        enriched, _ = await agent.generate_table_metadata(
             preview_data,
             table_name,
             [],  # No need to check existing names for external tables
@@ -96,47 +96,52 @@ def enrich_metadata_with_ai(table_metadata: Dict, sample_data: pd.DataFrame) -> 
         return table_metadata
 
 
-def sync_external_tables(
+async def sync_external_tables(
     connection_id: int, selected_tables: List[Dict], project_id: int = None
 ) -> bool:
     """Sync selected tables metadata to local database"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
+    async with get_transaction() as conn:
+        try:
+            connector = await cm.get_connector_async(connection_id)
 
-    try:
-        connector = cm.get_connector(connection_id)
+            for table_info in selected_tables:
+                schema = table_info.get("schema", "public")
+                table_name = table_info["table_name"]
 
-        for table_info in selected_tables:
-            schema = table_info.get("schema", "public")
-            table_name = table_info["table_name"]
+                print(f"Syncing table: {schema}.{table_name}")
 
-            print(f"Syncing table: {schema}.{table_name}")
+                # Get detailed metadata
+                metadata = connector.get_table_metadata(schema, table_name)
 
-            # Get detailed metadata
-            metadata = connector.get_table_metadata(schema, table_name)
+                # Get sample data for AI enrichment
+                try:
+                    sample_data = connector.get_sample_data(schema, table_name, limit=100)
 
-            # Get sample data for AI enrichment
-            try:
-                sample_data = connector.get_sample_data(schema, table_name, limit=100)
+                    # Enrich with AI (now async)
+                    metadata = await enrich_metadata_with_ai(metadata, sample_data)
+                except Exception as e:
+                    print(f"Failed to get sample data or enrich: {e}")
+                    # Continue without AI enrichment
 
-                # Enrich with AI
-                metadata = enrich_metadata_with_ai(metadata, sample_data)
-            except Exception as e:
-                print(f"Failed to get sample data or enrich: {e}")
-                # Continue without AI enrichment
+                # Create display name
+                display_name = table_info.get("display_name", table_name)
 
-            # Create display name
-            display_name = table_info.get("display_name", table_name)
-
-            # Insert or update external table
-            cursor.execute(
-                f"""
-                INSERT OR REPLACE INTO {EXTERNAL_TABLES_TABLE}
-                (connection_id, schema_name, table_name, display_name, description, 
-                 columns_metadata, row_count, last_synced, is_selected, project_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-                (
+                # Insert or update external table (PostgreSQL UPSERT)
+                await conn.execute(
+                    f"""
+                    INSERT INTO {EXTERNAL_TABLES_TABLE}
+                    (connection_id, schema_name, table_name, display_name, description, 
+                     columns_metadata, row_count, last_synced, is_selected, project_id)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                    ON CONFLICT (connection_id, schema_name, table_name) DO UPDATE SET
+                        display_name = EXCLUDED.display_name,
+                        description = EXCLUDED.description,
+                        columns_metadata = EXCLUDED.columns_metadata,
+                        row_count = EXCLUDED.row_count,
+                        last_synced = EXCLUDED.last_synced,
+                        is_selected = EXCLUDED.is_selected,
+                        project_id = EXCLUDED.project_id
+                    """,
                     connection_id,
                     schema,
                     table_name,
@@ -144,31 +149,22 @@ def sync_external_tables(
                     metadata.get("description", ""),
                     json.dumps(metadata.get("columns", [])),
                     metadata.get("row_count", 0),
-                    datetime.now().isoformat(),
-                    1,  # Mark as selected by default
+                    datetime.now(),
+                    True,  # Mark as selected by default
                     project_id,
-                ),
-            )
+                )
 
-        connector.disconnect()
-        conn.commit()
-        return True
+            connector.disconnect()
+            return True
 
-    except Exception as e:
-        conn.rollback()
-        raise Exception(f"Failed to sync tables: {str(e)}")
-    finally:
-        conn.close()
+        except Exception as e:
+            raise Exception(f"Failed to sync tables: {str(e)}")
 
 
-def get_external_tables(
+async def get_external_tables(
     connection_id: int = None, project_id: int = None
 ) -> List[Dict]:
     """Get all external tables, optionally filtered by connection and/or project"""
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-
     query = f"""
         SELECT et.*, c.connection_name, c.db_type
         FROM {EXTERNAL_TABLES_TABLE} et
@@ -176,21 +172,24 @@ def get_external_tables(
         WHERE 1=1
     """
     params = []
+    param_num = 1
 
     if connection_id is not None:
-        query += " AND et.connection_id = ?"
+        query += f" AND et.connection_id = ${param_num}"
         params.append(connection_id)
+        param_num += 1
 
     if project_id is not None:
-        query += " AND et.project_id = ?"
+        query += f" AND et.project_id = ${param_num}"
         params.append(project_id)
+        param_num += 1
 
     query += " ORDER BY et.display_name"
 
-    cursor.execute(query, tuple(params))
+    rows = await fetch(query, *params)
 
     tables = []
-    for row in cursor.fetchall():
+    for row in rows:
         table = dict(row)
         # Parse columns metadata
         if table.get("columns_metadata"):
@@ -198,141 +197,103 @@ def get_external_tables(
                 table["columns"] = json.loads(table["columns_metadata"])
             except:
                 table["columns"] = []
-        del table["columns_metadata"]
+        if "columns_metadata" in table:
+            del table["columns_metadata"]
         tables.append(table)
 
-    conn.close()
     return tables
 
 
-def delete_external_table(table_id: int) -> bool:
+async def delete_external_table(table_id: int) -> bool:
     """Delete an external table from local metadata by ID"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    try:
-        cursor.execute(f"DELETE FROM {EXTERNAL_TABLES_TABLE} WHERE id = ?", (table_id,))
-        conn.commit()
-        return cursor.rowcount > 0
-    finally:
-        conn.close()
+    result = await execute(f"DELETE FROM {EXTERNAL_TABLES_TABLE} WHERE id = $1", table_id)
+    return "DELETE" in result
 
 
-def delete_external_table_by_name(table_name: str) -> bool:
+async def delete_external_table_by_name(table_name: str) -> bool:
     """Delete an external table from local metadata by display name or table name"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    try:
-        # Try to delete by display_name first (what user sees), then by table_name
-        cursor.execute(
-            f"DELETE FROM {EXTERNAL_TABLES_TABLE} WHERE display_name = ? OR table_name = ?",
-            (table_name, table_name),
-        )
-        conn.commit()
-        return cursor.rowcount > 0
-    finally:
-        conn.close()
+    result = await execute(
+        f"DELETE FROM {EXTERNAL_TABLES_TABLE} WHERE display_name = $1 OR table_name = $1",
+        table_name
+    )
+    return "DELETE" in result
 
 
-def update_external_table_selection(table_id: int, is_selected: bool) -> bool:
+async def update_external_table_selection(table_id: int, is_selected: bool) -> bool:
     """Update whether an external table is selected for querying"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    try:
-        cursor.execute(
-            f"""
-            UPDATE {EXTERNAL_TABLES_TABLE}
-            SET is_selected = ?
-            WHERE id = ?
+    result = await execute(
+        f"""
+        UPDATE {EXTERNAL_TABLES_TABLE}
+        SET is_selected = $1
+        WHERE id = $2
         """,
-            (is_selected, table_id),
-        )
-        conn.commit()
-        return cursor.rowcount > 0
-    finally:
-        conn.close()
+        is_selected, table_id
+    )
+    return "UPDATE" in result
 
 
-def update_external_table_metadata(
+async def update_external_table_metadata(
     table_name: str, metadata: Dict, connection_id: int = None, schema: str = None
 ) -> bool:
     """Update metadata for an external table"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
     try:
         columns_json = json.dumps(metadata.get("columns", []))
 
         # Build query and params based on available identifiers
-        query = f"UPDATE {EXTERNAL_TABLES_TABLE} SET description = ?, columns_metadata = ? WHERE table_name = ?"
+        query = f"UPDATE {EXTERNAL_TABLES_TABLE} SET description = $1, columns_metadata = $2 WHERE table_name = $3"
         params = [metadata.get("description", ""), columns_json, table_name]
+        param_num = 4
 
         if connection_id is not None:
-            query += " AND connection_id = ?"
+            query += f" AND connection_id = ${param_num}"
             params.append(connection_id)
+            param_num += 1
 
         if schema is not None:
-            query += " AND schema_name = ?"
+            query += f" AND schema_name = ${param_num}"
             params.append(schema)
 
-        cursor.execute(query, tuple(params))
+        result = await execute(query, *params)
+        return "UPDATE" in result
 
-        if cursor.rowcount == 0:
-            return False
-
-        conn.commit()
-        return True
     except Exception as e:
         print(f"Failed to update external table metadata for {table_name}: {e}")
         raise e
-    finally:
-        conn.close()
 
 
-def delete_external_table_composite(
+async def delete_external_table_composite(
     table_name: str, connection_id: int = None, schema: str = None
 ) -> bool:
     """Delete an external table using composite keys (safer than just name)"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
+    query = f"DELETE FROM {EXTERNAL_TABLES_TABLE} WHERE table_name = $1"
+    params = [table_name]
+    param_num = 2
 
-    try:
-        query = f"DELETE FROM {EXTERNAL_TABLES_TABLE} WHERE table_name = ?"
-        params = [table_name]
+    if connection_id is not None:
+        query += f" AND connection_id = ${param_num}"
+        params.append(connection_id)
+        param_num += 1
 
-        if connection_id is not None:
-            query += " AND connection_id = ?"
-            params.append(connection_id)
+    if schema is not None:
+        query += f" AND schema_name = ${param_num}"
+        params.append(schema)
 
-        if schema is not None:
-            query += " AND schema_name = ?"
-            params.append(schema)
-
-        cursor.execute(query, tuple(params))
-        conn.commit()
-        return cursor.rowcount > 0
-    finally:
-        conn.close()
+    result = await execute(query, *params)
+    return "DELETE" in result
 
 
-def get_selected_external_tables() -> List[Dict]:
+async def get_selected_external_tables() -> List[Dict]:
     """Get all selected external tables"""
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-
-    cursor.execute(f"""
+    rows = await fetch(f"""
         SELECT et.*, c.connection_name, c.db_type
         FROM {EXTERNAL_TABLES_TABLE} et
         JOIN db_connections c ON et.connection_id = c.id
-        WHERE et.is_selected = 1
+        WHERE et.is_selected = TRUE
         ORDER BY et.display_name
     """)
 
     tables = []
-    for row in cursor.fetchall():
+    for row in rows:
         table = dict(row)
         if table.get("columns_metadata"):
             try:
@@ -341,5 +302,4 @@ def get_selected_external_tables() -> List[Dict]:
                 table["columns"] = []
         tables.append(table)
 
-    conn.close()
     return tables

@@ -31,7 +31,7 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    user = auth.get_user_by_id(token_data.user_id)
+    user = await auth.get_user_by_id(token_data.user_id)
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -68,7 +68,7 @@ async def get_optional_user(
         if token_data is None:
             return None
 
-        user = auth.get_user_by_id(token_data.user_id)
+        user = await auth.get_user_by_id(token_data.user_id)
         if user:
             user.pop("password_hash", None)
         return user
@@ -93,14 +93,14 @@ class ProjectAccessChecker:
         Returns a dict with user info and their role in the project.
         """
         # Check project exists
-        project = projects.get_project(project_id)
+        project = await projects.get_project(project_id)
         if not project:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="Project not found"
             )
 
         # Check user has access
-        user_role = projects.get_user_role(project_id, current_user["id"])
+        user_role = await projects.get_user_role(project_id, current_user["id"])
         if not user_role:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
@@ -108,7 +108,7 @@ class ProjectAccessChecker:
             )
 
         # Check role level
-        if not projects.user_has_access(project_id, current_user["id"], self.min_role):
+        if not await projects.user_has_access(project_id, current_user["id"], self.min_role):
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"This action requires '{self.min_role}' access or higher",

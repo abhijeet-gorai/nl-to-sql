@@ -6,14 +6,12 @@ Handles sending verification emails using Gmail SMTP
 import smtplib
 import os
 import secrets
-import sqlite3
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
-# Database path
-DB_PATH = "database.db"
+from database_config import get_connection, execute, fetchrow
 
 # Email configuration from environment
 GMAIL_EMAIL_ID = os.getenv("GMAIL_EMAIL_ID")
@@ -26,24 +24,19 @@ FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
 VERIFICATION_TOKEN_EXPIRY_HOURS = 24
 
 
-def init_verification_tokens_table():
+async def init_verification_tokens_table():
     """Initialize the email verification tokens table"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS email_verification_tokens (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            token TEXT UNIQUE NOT NULL,
-            expires_at TIMESTAMP NOT NULL,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users(id)
-        )
-    """)
-
-    conn.commit()
-    conn.close()
+    async with get_connection() as conn:
+        await conn.execute("""
+            CREATE TABLE IF NOT EXISTS email_verification_tokens (
+                id SERIAL PRIMARY KEY,
+                user_id INTEGER NOT NULL,
+                token TEXT UNIQUE NOT NULL,
+                expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+        """)
 
 
 def generate_verification_token() -> str:
@@ -51,61 +44,47 @@ def generate_verification_token() -> str:
     return secrets.token_urlsafe(32)
 
 
-def create_verification_token(user_id: int) -> str:
+async def create_verification_token(user_id: int) -> str:
     """
     Create a verification token for a user.
     Deletes any existing tokens for this user first.
     Returns the new token.
     """
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    try:
+    async with get_connection() as conn:
         # Delete any existing tokens for this user
-        cursor.execute(
-            "DELETE FROM email_verification_tokens WHERE user_id = ?",
-            (user_id,)
+        await conn.execute(
+            "DELETE FROM email_verification_tokens WHERE user_id = $1",
+            user_id
         )
 
         # Generate new token
         token = generate_verification_token()
-        expires_at = datetime.utcnow() + timedelta(hours=VERIFICATION_TOKEN_EXPIRY_HOURS)
+        expires_at = datetime.now(timezone.utc) + timedelta(hours=VERIFICATION_TOKEN_EXPIRY_HOURS)
 
-        cursor.execute(
+        await conn.execute(
             """
             INSERT INTO email_verification_tokens (user_id, token, expires_at)
-            VALUES (?, ?, ?)
+            VALUES ($1, $2, $3)
             """,
-            (user_id, token, expires_at)
+            user_id, token, expires_at
         )
 
-        conn.commit()
         return token
 
-    finally:
-        conn.close()
 
-
-def get_verification_token_data(token: str) -> Optional[dict]:
+async def get_verification_token_data(token: str) -> Optional[dict]:
     """
     Get verification token data.
     Returns dict with user_id and expires_at, or None if not found.
     """
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-
-    cursor.execute(
+    row = await fetchrow(
         """
         SELECT user_id, expires_at, created_at
         FROM email_verification_tokens
-        WHERE token = ?
+        WHERE token = $1
         """,
-        (token,)
+        token
     )
-
-    row = cursor.fetchone()
-    conn.close()
 
     if row:
         return {
@@ -116,63 +95,55 @@ def get_verification_token_data(token: str) -> Optional[dict]:
     return None
 
 
-def delete_verification_token(token: str) -> bool:
+async def delete_verification_token(token: str) -> bool:
     """Delete a verification token after successful verification"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    try:
-        cursor.execute(
-            "DELETE FROM email_verification_tokens WHERE token = ?",
-            (token,)
-        )
-        conn.commit()
-        return cursor.rowcount > 0
-    finally:
-        conn.close()
+    result = await execute(
+        "DELETE FROM email_verification_tokens WHERE token = $1",
+        token
+    )
+    return "DELETE" in result
 
 
-def mark_email_verified(user_id: int) -> bool:
+async def mark_email_verified(user_id: int) -> bool:
     """Mark a user's email as verified"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    try:
-        cursor.execute(
-            """
-            UPDATE users 
-            SET is_email_verified = 1, updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?
-            """,
-            (user_id,)
-        )
-        conn.commit()
-        return cursor.rowcount > 0
-    finally:
-        conn.close()
+    result = await execute(
+        """
+        UPDATE users 
+        SET is_email_verified = TRUE, updated_at = NOW()
+        WHERE id = $1
+        """,
+        user_id
+    )
+    return "UPDATE" in result
 
 
-def verify_email_token(token: str) -> dict:
+async def verify_email_token(token: str) -> dict:
     """
     Verify an email token.
     Returns dict with success status and message.
     """
-    token_data = get_verification_token_data(token)
+    token_data = await get_verification_token_data(token)
 
     if not token_data:
         return {"success": False, "message": "Invalid verification token"}
 
     # Check if token has expired
-    expires_at = datetime.fromisoformat(token_data["expires_at"])
-    if datetime.utcnow() > expires_at:
+    expires_at = token_data["expires_at"]
+    # Handle both datetime objects and strings
+    if isinstance(expires_at, str):
+        expires_at = datetime.fromisoformat(expires_at.replace(' ', 'T'))
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    
+    if datetime.now(timezone.utc) > expires_at:
         # Clean up expired token
-        delete_verification_token(token)
+        await delete_verification_token(token)
         return {"success": False, "message": "Verification token has expired"}
 
     # Mark user as verified
-    if mark_email_verified(token_data["user_id"]):
+    if await mark_email_verified(token_data["user_id"]):
         # Delete the used token
-        delete_verification_token(token)
+        await delete_verification_token(token)
         return {"success": True, "message": "Email verified successfully"}
 
     return {"success": False, "message": "Failed to verify email"}
@@ -308,25 +279,18 @@ The DataTalk Team
         return False
 
 
-def get_user_by_email(email: str) -> Optional[dict]:
+async def get_user_by_email(email: str) -> Optional[dict]:
     """Get user by email (for resend verification)"""
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-
-    cursor.execute("SELECT * FROM users WHERE email = ?", (email,))
-    row = cursor.fetchone()
-    conn.close()
-
+    row = await fetchrow("SELECT * FROM users WHERE email = $1", email)
     return dict(row) if row else None
 
 
-def resend_verification_email(email: str) -> dict:
+async def resend_verification_email(email: str) -> dict:
     """
     Resend verification email to a user.
     Returns dict with success status and message.
     """
-    user = get_user_by_email(email)
+    user = await get_user_by_email(email)
 
     if not user:
         # Don't reveal if email exists or not for security
@@ -336,7 +300,7 @@ def resend_verification_email(email: str) -> dict:
         return {"success": False, "message": "Email is already verified. Please login."}
 
     # Create new token and send email
-    token = create_verification_token(user["id"])
+    token = await create_verification_token(user["id"])
     if send_verification_email(email, user["username"], token):
         return {"success": True, "message": "Verification email sent. Please check your inbox."}
     else:

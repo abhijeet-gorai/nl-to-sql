@@ -3,12 +3,14 @@ Connection Manager Module
 Manages database connections and credentials with encryption
 """
 
-import sqlite3
 import json
 from typing import Dict, List, Optional
 from cryptography.fernet import Fernet
 import os
+import asyncpg
+
 from db_connector import DatabaseConnector, ConnectionConfig, get_connector_class
+from database_config import get_connection, get_transaction, execute, fetch, fetchrow, fetchval
 
 # Get encryption key from environment
 ENCRYPTION_KEY = os.getenv("DB_ENCRYPTION_KEY")
@@ -24,94 +26,88 @@ cipher_suite = Fernet(
     ENCRYPTION_KEY if isinstance(ENCRYPTION_KEY, bytes) else ENCRYPTION_KEY.encode()
 )
 
-DB_PATH = "database.db"
 CONNECTIONS_TABLE = "db_connections"
 EXTERNAL_TABLES_TABLE = "external_tables"
 
 
-def init_connections_table():
+async def init_connections_table():
     """Initialize the connections and external tables tables"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
+    async with get_connection() as conn:
+        # Create connections table
+        await conn.execute(f"""
+            CREATE TABLE IF NOT EXISTS {CONNECTIONS_TABLE} (
+                id SERIAL PRIMARY KEY,
+                connection_name TEXT NOT NULL,
+                db_type TEXT NOT NULL,
+                host TEXT,
+                port INTEGER,
+                database_name TEXT,
+                username TEXT,
+                password_encrypted TEXT,
+                ssl_enabled BOOLEAN DEFAULT FALSE,
+                connection_params TEXT,
+                is_active BOOLEAN DEFAULT TRUE,
+                project_id INTEGER,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                FOREIGN KEY (project_id) REFERENCES projects(id),
+                UNIQUE(connection_name, project_id)
+            )
+        """)
 
-    # Create connections table
-    cursor.execute(f"""
-        CREATE TABLE IF NOT EXISTS {CONNECTIONS_TABLE} (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            connection_name TEXT NOT NULL,
-            db_type TEXT NOT NULL,
-            host TEXT,
-            port INTEGER,
-            database_name TEXT,
-            username TEXT,
-            password_encrypted TEXT,
-            ssl_enabled BOOLEAN DEFAULT 0,
-            connection_params TEXT,
-            is_active BOOLEAN DEFAULT 1,
-            project_id INTEGER,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (project_id) REFERENCES projects(id),
-            UNIQUE(connection_name, project_id)
-        )
-    """)
+        # Create external tables table
+        await conn.execute(f"""
+            CREATE TABLE IF NOT EXISTS {EXTERNAL_TABLES_TABLE} (
+                id SERIAL PRIMARY KEY,
+                connection_id INTEGER NOT NULL,
+                schema_name TEXT,
+                table_name TEXT NOT NULL,
+                display_name TEXT NOT NULL,
+                description TEXT,
+                columns_metadata TEXT,
+                row_count INTEGER,
+                last_synced TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+                is_selected BOOLEAN DEFAULT FALSE,
+                project_id INTEGER,
+                FOREIGN KEY (connection_id) REFERENCES {CONNECTIONS_TABLE}(id) ON DELETE CASCADE,
+                FOREIGN KEY (project_id) REFERENCES projects(id),
+                UNIQUE(connection_id, schema_name, table_name)
+            )
+        """)
 
-    # Create external tables table
-    cursor.execute(f"""
-        CREATE TABLE IF NOT EXISTS {EXTERNAL_TABLES_TABLE} (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            connection_id INTEGER NOT NULL,
-            schema_name TEXT,
-            table_name TEXT NOT NULL,
-            display_name TEXT NOT NULL,
-            description TEXT,
-            columns_metadata TEXT,
-            row_count INTEGER,
-            last_synced TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            is_selected BOOLEAN DEFAULT 0,
-            project_id INTEGER,
-            FOREIGN KEY (connection_id) REFERENCES {CONNECTIONS_TABLE}(id) ON DELETE CASCADE,
-            FOREIGN KEY (project_id) REFERENCES projects(id),
-            UNIQUE(connection_id, schema_name, table_name)
-        )
-    """)
+        # Add columns to app_metadata if they don't exist (PostgreSQL way)
+        # Check and add source_type column
+        await conn.execute("""
+            DO $$ 
+            BEGIN 
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                               WHERE table_name = 'app_metadata' AND column_name = 'source_type') THEN
+                    ALTER TABLE app_metadata ADD COLUMN source_type TEXT DEFAULT 'csv';
+                END IF;
+            END $$;
+        """)
 
-    # Migration: Add project_id columns if they don't exist
-    try:
-        cursor.execute(f"ALTER TABLE {CONNECTIONS_TABLE} ADD COLUMN project_id INTEGER")
-    except sqlite3.OperationalError:
-        pass  # Column already exists
+        # Check and add connection_id column
+        await conn.execute("""
+            DO $$ 
+            BEGIN 
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                               WHERE table_name = 'app_metadata' AND column_name = 'connection_id') THEN
+                    ALTER TABLE app_metadata ADD COLUMN connection_id INTEGER;
+                END IF;
+            END $$;
+        """)
 
-    try:
-        cursor.execute(
-            f"ALTER TABLE {EXTERNAL_TABLES_TABLE} ADD COLUMN project_id INTEGER"
-        )
-    except sqlite3.OperationalError:
-        pass  # Column already exists
-
-    # Update app_metadata table to support external sources
-    try:
-        cursor.execute(
-            "ALTER TABLE app_metadata ADD COLUMN source_type TEXT DEFAULT 'csv'"
-        )
-    except sqlite3.OperationalError:
-        # Column already exists
-        pass
-
-    try:
-        cursor.execute("ALTER TABLE app_metadata ADD COLUMN connection_id INTEGER")
-    except sqlite3.OperationalError:
-        # Column already exists
-        pass
-
-    try:
-        cursor.execute("ALTER TABLE app_metadata ADD COLUMN schema_name TEXT")
-    except sqlite3.OperationalError:
-        # Column already exists
-        pass
-
-    conn.commit()
-    conn.close()
+        # Check and add schema_name column
+        await conn.execute("""
+            DO $$ 
+            BEGIN 
+                IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                               WHERE table_name = 'app_metadata' AND column_name = 'schema_name') THEN
+                    ALTER TABLE app_metadata ADD COLUMN schema_name TEXT;
+                END IF;
+            END $$;
+        """)
 
 
 def encrypt_password(password: str) -> str:
@@ -124,163 +120,125 @@ def decrypt_password(encrypted: str) -> str:
     return cipher_suite.decrypt(encrypted.encode()).decode()
 
 
-def create_connection(connection_data: Dict, project_id: int = None) -> int:
+async def create_connection(connection_data: Dict, project_id: int = None) -> int:
     """Create new database connection"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
     try:
         # Encrypt password
         encrypted_pwd = encrypt_password(connection_data["password"])
 
-        cursor.execute(
+        connection_id = await fetchval(
             f"""
             INSERT INTO {CONNECTIONS_TABLE} 
             (connection_name, db_type, host, port, database_name, username, 
              password_encrypted, ssl_enabled, connection_params, project_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-            (
-                connection_data["connection_name"],
-                connection_data["db_type"],
-                connection_data.get("host"),
-                connection_data.get("port"),
-                connection_data.get("database_name"),
-                connection_data.get("username"),
-                encrypted_pwd,
-                connection_data.get("ssl_enabled", False),
-                json.dumps(connection_data.get("connection_params", {})),
-                project_id,
-            ),
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            RETURNING id
+            """,
+            connection_data["connection_name"],
+            connection_data["db_type"],
+            connection_data.get("host"),
+            connection_data.get("port"),
+            connection_data.get("database_name"),
+            connection_data.get("username"),
+            encrypted_pwd,
+            connection_data.get("ssl_enabled", False),
+            json.dumps(connection_data.get("connection_params", {})),
+            project_id,
         )
-
-        conn.commit()
-        connection_id = cursor.lastrowid
         return connection_id
 
-    except sqlite3.IntegrityError:
+    except asyncpg.UniqueViolationError:
         raise ValueError(
             f"Connection name '{connection_data['connection_name']}' already exists in this project"
         )
-    finally:
-        conn.close()
 
 
-def update_connection(connection_id: int, connection_data: Dict) -> bool:
+async def update_connection(connection_id: int, connection_data: Dict) -> bool:
     """Update existing connection"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
+    # Encrypt password if provided
+    if "password" in connection_data:
+        connection_data["password_encrypted"] = encrypt_password(
+            connection_data["password"]
+        )
+        del connection_data["password"]
 
-    try:
-        # Encrypt password if provided
-        if "password" in connection_data:
-            connection_data["password_encrypted"] = encrypt_password(
-                connection_data["password"]
-            )
-            del connection_data["password"]
+    # Build update query
+    fields = []
+    values = []
+    param_num = 1
+    for key, value in connection_data.items():
+        if key in [
+            "host",
+            "port",
+            "database_name",
+            "username",
+            "password_encrypted",
+            "ssl_enabled",
+            "connection_params",
+            "is_active",
+        ]:
+            fields.append(f"{key} = ${param_num}")
+            if key == "connection_params" and isinstance(value, dict):
+                values.append(json.dumps(value))
+            else:
+                values.append(value)
+            param_num += 1
 
-        # Build update query
-        fields = []
-        values = []
-        for key, value in connection_data.items():
-            if key in [
-                "host",
-                "port",
-                "database_name",
-                "username",
-                "password_encrypted",
-                "ssl_enabled",
-                "connection_params",
-                "is_active",
-            ]:
-                fields.append(f"{key} = ?")
-                if key == "connection_params" and isinstance(value, dict):
-                    values.append(json.dumps(value))
-                else:
-                    values.append(value)
+    if not fields:
+        return False
 
-        if not fields:
-            return False
+    fields.append("updated_at = NOW()")
+    values.append(connection_id)
 
-        fields.append("updated_at = CURRENT_TIMESTAMP")
-        values.append(connection_id)
-
-        query = f"UPDATE {CONNECTIONS_TABLE} SET {', '.join(fields)} WHERE id = ?"
-        cursor.execute(query, values)
-
-        conn.commit()
-        return cursor.rowcount > 0
-
-    finally:
-        conn.close()
+    query = f"UPDATE {CONNECTIONS_TABLE} SET {', '.join(fields)} WHERE id = ${param_num}"
+    result = await execute(query, *values)
+    return "UPDATE" in result
 
 
-def delete_connection(connection_id: int) -> bool:
+async def delete_connection(connection_id: int) -> bool:
     """Delete connection and associated tables"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    try:
+    async with get_transaction() as conn:
         # Delete from external_tables first (foreign key)
-        cursor.execute(
-            f"DELETE FROM {EXTERNAL_TABLES_TABLE} WHERE connection_id = ?",
-            (connection_id,),
+        await conn.execute(
+            f"DELETE FROM {EXTERNAL_TABLES_TABLE} WHERE connection_id = $1",
+            connection_id
         )
 
         # Delete connection
-        cursor.execute(
-            f"DELETE FROM {CONNECTIONS_TABLE} WHERE id = ?", (connection_id,)
+        result = await conn.execute(
+            f"DELETE FROM {CONNECTIONS_TABLE} WHERE id = $1", connection_id
         )
 
-        conn.commit()
-        return cursor.rowcount > 0
-
-    finally:
-        conn.close()
+        return "DELETE" in result
 
 
-def get_all_connections(project_id: int = None) -> List[Dict]:
+async def get_all_connections(project_id: int = None) -> List[Dict]:
     """Get all saved connections (without passwords)"""
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-
     if project_id is not None:
-        cursor.execute(
+        rows = await fetch(
             f"""
             SELECT id, connection_name, db_type, host, port, database_name, 
                    username, ssl_enabled, is_active, project_id, created_at, updated_at
             FROM {CONNECTIONS_TABLE}
-            WHERE project_id = ?
+            WHERE project_id = $1
             ORDER BY connection_name
-        """,
-            (project_id,),
+            """,
+            project_id
         )
     else:
-        cursor.execute(f"""
+        rows = await fetch(f"""
             SELECT id, connection_name, db_type, host, port, database_name, 
                    username, ssl_enabled, is_active, project_id, created_at, updated_at
             FROM {CONNECTIONS_TABLE}
             ORDER BY connection_name
         """)
 
-    connections = []
-    for row in cursor.fetchall():
-        connections.append(dict(row))
-
-    conn.close()
-    return connections
+    return [dict(row) for row in rows]
 
 
-def get_connection(connection_id: int) -> Optional[Dict]:
+async def get_connection_by_id(connection_id: int) -> Optional[Dict]:
     """Get connection details including decrypted password"""
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-
-    cursor.execute(f"SELECT * FROM {CONNECTIONS_TABLE} WHERE id = ?", (connection_id,))
-    row = cursor.fetchone()
-    conn.close()
+    row = await fetchrow(f"SELECT * FROM {CONNECTIONS_TABLE} WHERE id = $1", connection_id)
 
     if not row:
         return None
@@ -307,9 +265,83 @@ def get_connection(connection_id: int) -> Optional[Dict]:
     return connection
 
 
+# Alias for backwards compatibility
+get_connection_details = get_connection_by_id
+
+
 def get_connector(connection_id: int) -> DatabaseConnector:
-    """Get appropriate connector instance for a connection"""
-    connection = get_connection(connection_id)
+    """Get appropriate connector instance for a connection (sync helper for external DB connections).
+    
+    Uses synchronous psycopg to avoid conflicts with async event loop.
+    This is intentionally synchronous for compatibility with external database connectors.
+    """
+    import os
+    import psycopg
+    
+    # Build connection string for sync psycopg
+    host = os.getenv("PGHOST", "localhost")
+    port = os.getenv("PGPORT", "5432")
+    database = os.getenv("PGDATABASE", "nl_to_sql")
+    user = os.getenv("PGUSER", "postgres")
+    password = os.getenv("PGPASSWORD", "")
+    sslmode = os.getenv("PGSSLMODE", "prefer")
+    
+    conninfo = f"host={host} port={port} dbname={database} user={user} password={password} sslmode={sslmode}"
+    
+    # Use sync psycopg connection
+    with psycopg.connect(conninfo) as conn:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                f"SELECT * FROM {CONNECTIONS_TABLE} WHERE id = %s",
+                (connection_id,)
+            )
+            row = cursor.fetchone()
+            
+            if not row:
+                raise ValueError(f"Connection {connection_id} not found")
+            
+            # Get column names
+            columns = [desc[0] for desc in cursor.description]
+            connection = dict(zip(columns, row))
+    
+    # Decrypt password
+    if connection.get("password_encrypted"):
+        try:
+            connection["password"] = decrypt_password(connection["password_encrypted"])
+        except Exception as e:
+            print(f"Failed to decrypt password: {e}")
+            connection["password"] = ""
+    else:
+        connection["password"] = ""
+    
+    # Parse connection params
+    if connection.get("connection_params"):
+        try:
+            connection["connection_params"] = json.loads(connection["connection_params"])
+        except:
+            connection["connection_params"] = {}
+    else:
+        connection["connection_params"] = {}
+
+    config = ConnectionConfig(
+        host=connection["host"],
+        port=connection["port"],
+        database=connection["database_name"],
+        username=connection["username"],
+        password=connection["password"],
+        ssl_enabled=bool(connection["ssl_enabled"]),
+        connection_params=connection.get("connection_params", {}),
+    )
+
+    db_type = connection["db_type"].lower()
+    connector_class = get_connector_class(db_type)
+
+    return connector_class(config)
+
+
+async def get_connector_async(connection_id: int) -> DatabaseConnector:
+    """Get appropriate connector instance for a connection (async version)"""
+    connection = await get_connection_by_id(connection_id)
     if not connection:
         raise ValueError(f"Connection {connection_id} not found")
 
@@ -329,10 +361,10 @@ def get_connector(connection_id: int) -> DatabaseConnector:
     return connector_class(config)
 
 
-def test_connection(connection_id: int) -> Dict:
+async def test_connection(connection_id: int) -> Dict:
     """Test if connection is valid"""
     try:
-        connector = get_connector(connection_id)
+        connector = await get_connector_async(connection_id)
         result = connector.test_connection()
         connector.disconnect()
         return result

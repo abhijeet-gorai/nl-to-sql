@@ -1,59 +1,45 @@
-import sqlite3
 import pandas as pd
 import os
 import json
 import random
 import string
 from typing import List, Dict, Optional
+import asyncpg
 
-DB_PATH = "database.db"
+from database_config import get_connection, execute, fetch, fetchrow, fetchval, get_connection_string
+
 METADATA_TABLE = "app_metadata"
 
 
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
-    # Create metadata table
-    cursor.execute(f"""
-        CREATE TABLE IF NOT EXISTS {METADATA_TABLE} (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            table_name TEXT NOT NULL,
-            original_filename TEXT NOT NULL,
-            description TEXT,
-            columns_metadata TEXT,  -- JSON string
-            project_id INTEGER,
-            FOREIGN KEY (project_id) REFERENCES projects(id),
-            UNIQUE(table_name, project_id)
-        )
-    """)
-
-    # Migration: Add project_id column if it doesn't exist
-    try:
-        cursor.execute(f"ALTER TABLE {METADATA_TABLE} ADD COLUMN project_id INTEGER")
-    except sqlite3.OperationalError:
-        pass  # Column already exists
-
-    conn.commit()
-    conn.close()
+async def init_db():
+    async with get_connection() as conn:
+        # Create metadata table
+        await conn.execute(f"""
+            CREATE TABLE IF NOT EXISTS {METADATA_TABLE} (
+                id SERIAL PRIMARY KEY,
+                table_name TEXT NOT NULL,
+                original_filename TEXT NOT NULL,
+                description TEXT,
+                columns_metadata TEXT,
+                project_id INTEGER,
+                FOREIGN KEY (project_id) REFERENCES projects(id),
+                UNIQUE(table_name, project_id)
+            )
+        """)
 
 
-def check_table_exists(table_name: str, project_id: int = None) -> bool:
+async def check_table_exists(table_name: str, project_id: int = None) -> bool:
     """Checks if a table name already exists in the metadata for a project."""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
     if project_id is not None:
-        cursor.execute(
-            f"SELECT 1 FROM {METADATA_TABLE} WHERE table_name = ? AND project_id = ?",
-            (table_name, project_id),
+        result = await fetchrow(
+            f"SELECT 1 FROM {METADATA_TABLE} WHERE table_name = $1 AND project_id = $2",
+            table_name, project_id
         )
     else:
-        cursor.execute(
-            f"SELECT 1 FROM {METADATA_TABLE} WHERE table_name = ?", (table_name,)
+        result = await fetchrow(
+            f"SELECT 1 FROM {METADATA_TABLE} WHERE table_name = $1", table_name
         )
-    exists = cursor.fetchone() is not None
-    conn.close()
-    return exists
+    return result is not None
 
 
 def generate_random_suffix(length: int = 6) -> str:
@@ -119,208 +105,186 @@ def analyze_csv(file_path: str, original_filename: str) -> Dict:
         raise Exception(f"Failed to analyze CSV: {str(e)}")
 
 
-def register_table(file_path: str, metadata: Dict, project_id: int = None):
+async def register_table(file_path: str, metadata: Dict, project_id: int = None):
     """
-    Creates the table in SQLite and saves metadata.
+    Creates the table in PostgreSQL and saves metadata.
     metadata structure: { table_name, description, columns: [{name, description, type}] }
     """
     table_name = metadata["table_name"]
 
     try:
-        conn = sqlite3.connect(DB_PATH)
         df = pd.read_csv(file_path)
 
         # Sanitize columns in DF to match metadata names if we allow renaming later
         # For now, just ensuring valid SQL identifiers
         df.columns = [c.strip().replace(" ", "_") for c in df.columns]
 
+        # Use SQLAlchemy for pandas to_sql with PostgreSQL
+        from sqlalchemy import create_engine
+
+        engine = create_engine(get_connection_string().replace("postgresql://", "postgresql+psycopg://"))
+        
         # Write data
-        df.to_sql(table_name, conn, if_exists="fail", index=False)
+        df.to_sql(table_name, engine, if_exists="fail", index=False)
 
         # Save Metadata
-        cursor = conn.cursor()
         columns_json = json.dumps(metadata.get("columns", []))
-        cursor.execute(
+        await execute(
             f"""
             INSERT INTO {METADATA_TABLE} (table_name, original_filename, description, columns_metadata, project_id)
-            VALUES (?, ?, ?, ?, ?)
-        """,
-            (
-                table_name,
-                metadata.get("original_filename", "unknown"),
-                metadata.get("description", ""),
-                columns_json,
-                project_id,
-            ),
+            VALUES ($1, $2, $3, $4, $5)
+            """,
+            table_name,
+            metadata.get("original_filename", "unknown"),
+            metadata.get("description", ""),
+            columns_json,
+            project_id,
         )
 
-        conn.commit()
-        conn.close()
         return True
-    except sqlite3.IntegrityError:
+    except asyncpg.UniqueViolationError:
         raise Exception(f"Table '{table_name}' already exists.")
     except Exception as e:
+        if "already exists" in str(e).lower():
+            raise Exception(f"Table '{table_name}' already exists.")
         raise Exception(f"Failed to register table: {str(e)}")
 
 
-def update_table_metadata(
+async def update_table_metadata(
     table_name: str, metadata: Dict, project_id: int = None
 ) -> bool:
     """
     Updates description and columns_metadata for an existing table.
     """
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-
     try:
         columns_json = json.dumps(metadata.get("columns", []))
 
         if project_id is not None:
-            cursor.execute(
+            result = await execute(
                 f"""
                 UPDATE {METADATA_TABLE}
-                SET description = ?, columns_metadata = ?
-                WHERE table_name = ? AND project_id = ?
-            """,
-                (metadata.get("description", ""), columns_json, table_name, project_id),
+                SET description = $1, columns_metadata = $2
+                WHERE table_name = $3 AND project_id = $4
+                """,
+                metadata.get("description", ""), columns_json, table_name, project_id
             )
         else:
-            cursor.execute(
+            result = await execute(
                 f"""
                 UPDATE {METADATA_TABLE}
-                SET description = ?, columns_metadata = ?
-                WHERE table_name = ?
-            """,
-                (metadata.get("description", ""), columns_json, table_name),
+                SET description = $1, columns_metadata = $2
+                WHERE table_name = $3
+                """,
+                metadata.get("description", ""), columns_json, table_name
             )
 
-        if cursor.rowcount == 0:
-            return False
-
-        conn.commit()
-        return True
+        return "UPDATE" in result
     except Exception as e:
         print(f"Failed to update metadata for {table_name}: {e}")
         raise e
-    finally:
-        conn.close()
 
 
-def delete_table(table_name: str, project_id: int = None) -> bool:
+async def delete_table(table_name: str, project_id: int = None) -> bool:
     """
     Drops the table and removes its metadata.
     Returns False if the table does not exist.
     """
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
+    async with get_connection() as conn:
+        try:
+            # Check if table exists in PostgreSQL
+            result = await conn.fetchrow(
+                """
+                SELECT 1 FROM information_schema.tables 
+                WHERE table_schema = 'public' AND table_name = $1
+                """,
+                table_name
+            )
+            table_exists = result is not None
 
-    try:
-        # Check if table exists
-        cursor.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (table_name,)
-        )
-        table_exists = cursor.fetchone() is not None
+            if not table_exists:
+                return False
 
-        if not table_exists:
+            # Drop table (use quotes to handle case sensitivity)
+            await conn.execute(f'DROP TABLE IF EXISTS "{table_name}"')
+
+            # Remove metadata
+            if project_id is not None:
+                await conn.execute(
+                    f"DELETE FROM {METADATA_TABLE} WHERE table_name = $1 AND project_id = $2",
+                    table_name, project_id
+                )
+            else:
+                await conn.execute(
+                    f"DELETE FROM {METADATA_TABLE} WHERE table_name = $1", table_name
+                )
+
+            return True
+
+        except Exception as e:
+            print(f"Failed to delete table {table_name}: {e}")
             return False
 
-        # Drop table
-        cursor.execute(f"DROP TABLE IF EXISTS {table_name}")
 
-        # Remove metadata
-        if project_id is not None:
-            cursor.execute(
-                f"DELETE FROM {METADATA_TABLE} WHERE table_name = ? AND project_id = ?",
-                (table_name, project_id),
-            )
-        else:
-            cursor.execute(
-                f"DELETE FROM {METADATA_TABLE} WHERE table_name = ?", (table_name,)
-            )
-
-        conn.commit()
-        return True
-
-    except Exception as e:
-        print(f"Failed to delete table {table_name}: {e}")
-        return False
-
-    finally:
-        conn.close()
-
-
-def get_all_tables(project_id: int = None) -> List[Dict]:
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-
-    # Check if metadata table exists (migration check)
+async def get_all_tables(project_id: int = None) -> List[Dict]:
     try:
         if project_id is not None:
-            cursor.execute(
-                f"SELECT * FROM {METADATA_TABLE} WHERE project_id = ?", (project_id,)
+            rows = await fetch(
+                f"SELECT * FROM {METADATA_TABLE} WHERE project_id = $1", project_id
             )
         else:
-            cursor.execute(f"SELECT * FROM {METADATA_TABLE}")
-        rows = cursor.fetchall()
-    except sqlite3.OperationalError:
-        # If table doesn't exist, maybe it's old DB. Init and try again.
-        init_db()
+            rows = await fetch(f"SELECT * FROM {METADATA_TABLE}")
+
+        tables = []
+        for row in rows:
+            tables.append(
+                {
+                    "id": row["id"],
+                    "table_name": row["table_name"],
+                    "original_filename": row["original_filename"],
+                    "description": row["description"],
+                    "columns": json.loads(row["columns_metadata"])
+                    if row["columns_metadata"]
+                    else [],
+                    "project_id": row.get("project_id"),
+                }
+            )
+        return tables
+    except asyncpg.UndefinedTableError:
+        # If table doesn't exist, init and return empty
+        await init_db()
         return []
 
-    tables = []
-    for row in rows:
-        tables.append(
-            {
-                "id": row["id"],
-                "table_name": row["table_name"],
-                "original_filename": row["original_filename"],
-                "description": row["description"],
-                "columns": json.loads(row["columns_metadata"])
-                if row["columns_metadata"]
-                else [],
-                "project_id": row["project_id"] if "project_id" in row.keys() else None,
-            }
-        )
-    conn.close()
-    return tables
 
-
-def get_table_context(table_names: List[str]) -> str:
+async def get_table_context(table_names: List[str]) -> str:
     """
     Returns a formatted string describing the selected tables and their metadata for the LLM.
     """
     if not table_names:
         return ""
 
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-
-    placeholders = ",".join("?" for _ in table_names)
     try:
-        cursor.execute(
+        # Build parameterized query
+        placeholders = ", ".join(f"${i+1}" for i in range(len(table_names)))
+        rows = await fetch(
             f"SELECT * FROM {METADATA_TABLE} WHERE table_name IN ({placeholders})",
-            table_names,
+            *table_names
         )
-        rows = cursor.fetchall()
-    except:
+
+        context = ""
+        for row in rows:
+            context += f"Table: {row['table_name']}\n"
+            context += f"Description: {row['description']}\n"
+            context += "Columns:\n"
+            cols = json.loads(row["columns_metadata"]) if row["columns_metadata"] else []
+            for col in cols:
+                context += (
+                    f"  - {col['name']} ({col['type']}): {col.get('description', '')}\n"
+                )
+            context += "\n"
+
+        return context
+    except Exception:
         return ""
-    conn.close()
-
-    context = ""
-    for row in rows:
-        context += f"Table: {row['table_name']}\n"
-        context += f"Description: {row['description']}\n"
-        context += "Columns:\n"
-        cols = json.loads(row["columns_metadata"]) if row["columns_metadata"] else []
-        for col in cols:
-            context += (
-                f"  - {col['name']} ({col['type']}): {col.get('description', '')}\n"
-            )
-        context += "\n"
-
-    return context
 
 
 def execute_query(query: str):
@@ -330,13 +294,13 @@ def execute_query(query: str):
     if not query.strip().lower().startswith("select"):
         return "Error: Only SELECT queries are allowed."
 
-    conn = sqlite3.connect(DB_PATH)
     try:
-        df = pd.read_sql_query(query, conn)
-        conn.close()
+        from sqlalchemy import create_engine
+
+        engine = create_engine(get_connection_string().replace("postgresql://", "postgresql+psycopg://"))
+        df = pd.read_sql_query(query, engine)
         return df.to_markdown(index=False)
     except Exception as e:
-        conn.close()
         return f"Error executing query: {str(e)}"
 
 
@@ -347,12 +311,12 @@ def get_raw_dataframe(query: str) -> Optional[pd.DataFrame]:
     if not query.strip().lower().startswith("select"):
         return None
 
-    conn = sqlite3.connect(DB_PATH)
     try:
-        df = pd.read_sql_query(query, conn)
-        conn.close()
+        from sqlalchemy import create_engine
+
+        engine = create_engine(get_connection_string().replace("postgresql://", "postgresql+psycopg://"))
+        df = pd.read_sql_query(query, engine)
         return df
     except Exception as e:
-        conn.close()
         print(f"Error executing query: {e}")
         return None

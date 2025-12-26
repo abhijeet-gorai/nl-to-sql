@@ -96,10 +96,7 @@ async def register(request: RegisterRequest):
     The user must verify their email before they can log in.
     """
     try:
-        # Ensure verification tokens table exists
-        email_service.init_verification_tokens_table()
-
-        user_id = auth.create_user(
+        user_id = await auth.create_user(
             username=request.username,
             full_name=request.full_name,
             email=request.email,
@@ -107,7 +104,7 @@ async def register(request: RegisterRequest):
         )
 
         # Create verification token and send email
-        token = email_service.create_verification_token(user_id)
+        token = await email_service.create_verification_token(user_id)
         email_sent = email_service.send_verification_email(
             email=request.email,
             username=request.username,
@@ -140,7 +137,7 @@ async def login(request: LoginRequest):
 
     Note: User must have verified their email to log in.
     """
-    user = auth.authenticate_user(request.username, request.password)
+    user = await auth.authenticate_user(request.username, request.password)
 
     if not user:
         raise HTTPException(
@@ -210,7 +207,7 @@ async def change_password(
     - **new_password**: New password (minimum 8 characters)
     """
     try:
-        success = auth.update_password(
+        success = await auth.update_password(
             user_id=current_user["id"],
             old_password=request.current_password,
             new_password=request.new_password,
@@ -245,7 +242,7 @@ async def search_users(
             detail="Search query must be at least 2 characters",
         )
 
-    users = auth.search_users(q, limit=min(limit, 50))
+    users = await auth.search_users(q, limit=min(limit, 50))
 
     # Exclude current user from results
     users = [u for u in users if u["id"] != current_user["id"]]
@@ -265,7 +262,7 @@ async def verify_email(token: str = Query(..., description="Verification token f
 
     - **token**: The verification token received in the email
     """
-    result = email_service.verify_email_token(token)
+    result = await email_service.verify_email_token(token)
 
     if result["success"]:
         return {"status": "success", "message": result["message"]}
@@ -283,10 +280,7 @@ async def resend_verification(request: ResendVerificationRequest):
 
     - **email**: Email address to send verification to
     """
-    # Ensure verification tokens table exists
-    email_service.init_verification_tokens_table()
-
-    result = email_service.resend_verification_email(request.email)
+    result = await email_service.resend_verification_email(request.email)
 
     if result["success"]:
         return {"status": "success", "message": result["message"]}
