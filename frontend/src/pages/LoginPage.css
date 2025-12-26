@@ -3,7 +3,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background: var(--bg-primary);
+    background: var(--bg-app);
     padding: 1.5rem;
     position: relative;
 }
@@ -234,4 +234,118 @@
     .login-title {
         font-size: 1.5rem;
     }
+}
+
+/* Email verification styles */
+.success-logo {
+    background: linear-gradient(135deg, #22c55e, #16a34a) !important;
+}
+
+.email-highlight {
+    font-weight: 600;
+    color: var(--accent-primary);
+    font-size: 1rem;
+    margin: 0.5rem 0 0 0;
+    word-break: break-all;
+}
+
+.verification-info {
+    text-align: center;
+    padding: 1.5rem;
+    background: var(--bg-tertiary);
+    border-radius: 12px;
+    margin-bottom: 1.5rem;
+}
+
+.verification-info>p {
+    color: var(--text-secondary);
+    margin: 0 0 1.25rem 0;
+    line-height: 1.5;
+}
+
+.resend-section-inline {
+    padding-top: 1rem;
+    border-top: 1px solid var(--border-color);
+}
+
+.resend-section-inline>p {
+    color: var(--text-tertiary);
+    font-size: 0.875rem;
+    margin: 0 0 0.5rem 0;
+}
+
+.resend-link-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    background: none;
+    border: none;
+    color: var(--accent-primary);
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    padding: 0.375rem 0;
+    transition: color 0.2s ease;
+}
+
+.resend-link-btn:hover:not(:disabled) {
+    color: var(--accent-secondary);
+    text-decoration: underline;
+}
+
+.resend-link-btn:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+}
+
+.resend-message-inline {
+    color: var(--accent-primary);
+    font-size: 0.8125rem;
+    margin: 0.5rem 0 0 0;
+}
+
+.email-not-verified-notice {
+    display: flex;
+    gap: 1rem;
+    padding: 1rem;
+    background: rgba(251, 191, 36, 0.1);
+    border: 1px solid rgba(251, 191, 36, 0.3);
+    border-radius: 8px;
+    color: #f59e0b;
+}
+
+.email-not-verified-notice>svg {
+    flex-shrink: 0;
+    margin-top: 2px;
+}
+
+.notice-content {
+    flex: 1;
+}
+
+.notice-content p {
+    margin: 0;
+    font-size: 0.875rem;
+    line-height: 1.5;
+}
+
+.notice-content p:first-child {
+    margin-bottom: 0.25rem;
+}
+
+.notice-content p:nth-child(2) {
+    color: var(--text-secondary);
+    margin-bottom: 0.75rem;
+}
+
+.notice-content .resend-link-btn {
+    color: #f59e0b;
+}
+
+.notice-content .resend-link-btn:hover:not(:disabled) {
+    color: #d97706;
+}
+
+.notice-content .resend-message-inline {
+    color: var(--text-secondary);
 }

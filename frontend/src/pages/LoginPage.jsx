@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
-import { Eye, EyeOff, Database, Loader, Sun, Moon } from 'lucide-react';
+import { Eye, EyeOff, Database, Loader, Sun, Moon, Mail, CheckCircle } from 'lucide-react';
+import { resendVerification } from '../api/auth';
 import './LoginPage.css';
 
 const LoginPage = () => {
@@ -13,6 +14,14 @@ const LoginPage = () => {
     const [error, setError] = useState('');
     const [showPassword, setShowPassword] = useState(false);
     const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'dark');
+
+    // Email verification states
+    const [registrationSuccess, setRegistrationSuccess] = useState(false);
+    const [registrationEmail, setRegistrationEmail] = useState('');
+    const [emailNotVerified, setEmailNotVerified] = useState(false);
+    const [unverifiedEmail, setUnverifiedEmail] = useState('');
+    const [resendLoading, setResendLoading] = useState(false);
+    const [resendMessage, setResendMessage] = useState('');
 
     // Form fields
     const [username, setUsername] = useState('');
@@ -32,35 +41,142 @@ const LoginPage = () => {
     const handleSubmit = async (e) => {
         e.preventDefault();
         setError('');
+        setEmailNotVerified(false);
+        setResendMessage('');
         setLoading(true);
 
         try {
             if (isRegister) {
-                // Register then login
-                await register({
+                // Register (don't auto-login - user needs to verify email first)
+                const result = await register({
                     username,
                     full_name: fullName,
                     email,
                     password,
                 });
-                // After registration, log in
-                await login(username, password);
+                setRegistrationSuccess(true);
+                setRegistrationEmail(email);
+                // Clear form
+                setUsername('');
+                setPassword('');
+                setFullName('');
+                setEmail('');
             } else {
                 await login(username, password);
+                navigate('/projects');
             }
-            navigate('/projects');
         } catch (err) {
-            const message = err.response?.data?.detail || err.message || 'Authentication failed';
-            setError(typeof message === 'string' ? message : JSON.stringify(message));
+            const detail = err.response?.data?.detail;
+
+            // Check if it's an email not verified error
+            if (detail && typeof detail === 'object' && detail.code === 'EMAIL_NOT_VERIFIED') {
+                setEmailNotVerified(true);
+                setUnverifiedEmail(detail.email || '');
+                setError('');
+            } else {
+                const message = typeof detail === 'string' ? detail : (err.message || 'Authentication failed');
+                setError(message);
+            }
         } finally {
             setLoading(false);
+        }
+    };
+
+    const handleResendVerification = async () => {
+        const emailToResend = emailNotVerified ? unverifiedEmail : registrationEmail;
+        if (!emailToResend) return;
+
+        setResendLoading(true);
+        setResendMessage('');
+
+        try {
+            const result = await resendVerification(emailToResend);
+            setResendMessage(result.message || 'Verification email sent!');
+        } catch (err) {
+            const detail = err.response?.data?.detail;
+            setResendMessage(typeof detail === 'string' ? detail : 'Failed to resend verification email.');
+        } finally {
+            setResendLoading(false);
         }
     };
 
     const toggleMode = () => {
         setIsRegister(!isRegister);
         setError('');
+        setRegistrationSuccess(false);
+        setEmailNotVerified(false);
+        setResendMessage('');
     };
+
+    // Show registration success message
+    if (registrationSuccess) {
+        return (
+            <div className="login-page">
+                <button
+                    className="theme-toggle-btn"
+                    onClick={toggleTheme}
+                    title="Toggle Theme"
+                >
+                    {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
+                </button>
+
+                <div className="login-container">
+                    <div className="login-header">
+                        <div className="login-logo success-logo">
+                            <CheckCircle size={40} />
+                        </div>
+                        <h1 className="login-title">Check Your Email</h1>
+                        <p className="login-subtitle">
+                            We've sent a verification link to
+                        </p>
+                        <p className="email-highlight">{registrationEmail}</p>
+                    </div>
+
+                    <div className="verification-info">
+                        <p>Click the link in the email to verify your account, then come back to log in.</p>
+
+                        <div className="resend-section-inline">
+                            <p>Didn't receive the email?</p>
+                            <button
+                                type="button"
+                                className="resend-link-btn"
+                                onClick={handleResendVerification}
+                                disabled={resendLoading}
+                            >
+                                {resendLoading ? (
+                                    <>
+                                        <Loader className="spin" size={14} />
+                                        <span>Sending...</span>
+                                    </>
+                                ) : (
+                                    <span>Resend verification email</span>
+                                )}
+                            </button>
+                            {resendMessage && (
+                                <p className="resend-message-inline">{resendMessage}</p>
+                            )}
+                        </div>
+                    </div>
+
+                    <div className="login-footer">
+                        <p>
+                            Already verified?
+                            <button
+                                type="button"
+                                className="toggle-mode-btn"
+                                onClick={() => {
+                                    setRegistrationSuccess(false);
+                                    setIsRegister(false);
+                                }}
+                            >
+                                Sign In
+                            </button>
+                        </p>
+                    </div>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="login-page">
@@ -88,6 +204,27 @@ const LoginPage = () => {
                     {error && (
                         <div className="login-error">
                             {error}
+                        </div>
+                    )}
+
+                    {emailNotVerified && (
+                        <div className="email-not-verified-notice">
+                            <Mail size={20} />
+                            <div className="notice-content">
+                                <p><strong>Email not verified</strong></p>
+                                <p>Please check your email ({unverifiedEmail}) for the verification link.</p>
+                                <button
+                                    type="button"
+                                    className="resend-link-btn"
+                                    onClick={handleResendVerification}
+                                    disabled={resendLoading}
+                                >
+                                    {resendLoading ? 'Sending...' : 'Resend verification email'}
+                                </button>
+                                {resendMessage && (
+                                    <p className="resend-message-inline">{resendMessage}</p>
+                                )}
+                            </div>
                         </div>
                     )}
 

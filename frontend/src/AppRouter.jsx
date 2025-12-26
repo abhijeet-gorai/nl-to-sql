@@ -1,7 +1,7 @@
 import React from 'react';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from './context/AuthContext';
-import { LoginPage, ProjectsPage, WorkspacePage } from './pages';
+import { LoginPage, ProjectsPage, WorkspacePage, VerifyEmailPage } from './pages';
 
 // Protected route wrapper
 const ProtectedRoute = ({ children }) => {
@@ -55,6 +55,9 @@ const AppRouter = () => {
                     </PublicRoute>
                 }
             />
+
+            {/* Email verification route (public, no redirect) */}
+            <Route path="/verify-email" element={<VerifyEmailPage />} />
 
             {/* Protected routes */}
             <Route

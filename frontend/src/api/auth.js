@@ -65,3 +65,25 @@ export const searchUsers = async (query, limit = 10) => {
     });
     return response.data;
 };
+
+/**
+ * Verify email with token
+ * @param {string} token - Verification token from email
+ * @returns {Promise<Object>} - { status, message }
+ */
+export const verifyEmail = async (token) => {
+    const response = await apiClient.get('/auth/verify-email', {
+        params: { token },
+    });
+    return response.data;
+};
+
+/**
+ * Resend verification email
+ * @param {string} email - Email address to send verification to
+ * @returns {Promise<Object>} - { status, message }
+ */
+export const resendVerification = async (email) => {
+    const response = await apiClient.post('/auth/resend-verification', { email });
+    return response.data;
+};

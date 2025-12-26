@@ -3,10 +3,11 @@ Authentication Router
 FastAPI router for user authentication endpoints
 """
 
-from fastapi import APIRouter, HTTPException, status, Depends
+from fastapi import APIRouter, HTTPException, status, Depends, Query
 from pydantic import BaseModel, EmailStr, Field
 
 import auth
+import email_service
 from dependencies import get_current_user
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
@@ -33,6 +34,7 @@ class RegisterResponse(BaseModel):
     username: str
     full_name: str
     email: str
+    message: str = "Account created successfully"
 
 
 class LoginRequest(BaseModel):
@@ -67,6 +69,12 @@ class UserResponse(BaseModel):
     is_active: bool
 
 
+class ResendVerificationRequest(BaseModel):
+    """Request to resend verification email"""
+
+    email: EmailStr
+
+
 # ============================================
 # Endpoints
 # ============================================
@@ -83,8 +91,14 @@ async def register(request: RegisterRequest):
     - **full_name**: User's full name
     - **email**: Valid email address (must be unique)
     - **password**: Password (minimum 8 characters)
+
+    After registration, a verification email will be sent.
+    The user must verify their email before they can log in.
     """
     try:
+        # Ensure verification tokens table exists
+        email_service.init_verification_tokens_table()
+
         user_id = auth.create_user(
             username=request.username,
             full_name=request.full_name,
@@ -92,11 +106,24 @@ async def register(request: RegisterRequest):
             password=request.password,
         )
 
+        # Create verification token and send email
+        token = email_service.create_verification_token(user_id)
+        email_sent = email_service.send_verification_email(
+            email=request.email,
+            username=request.username,
+            token=token
+        )
+
+        message = "Account created! Please check your email to verify your account."
+        if not email_sent:
+            message = "Account created! However, we couldn't send the verification email. Please use 'Resend verification' to try again."
+
         return RegisterResponse(
             id=user_id,
             username=request.username,
             full_name=request.full_name,
             email=request.email,
+            message=message,
         )
 
     except ValueError as e:
@@ -110,6 +137,8 @@ async def login(request: LoginRequest):
 
     - **username**: Username
     - **password**: Password
+
+    Note: User must have verified their email to log in.
     """
     user = auth.authenticate_user(request.username, request.password)
 
@@ -118,6 +147,17 @@ async def login(request: LoginRequest):
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or password",
             headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # Check if email is verified
+    if not user.get("is_email_verified", False):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "message": "Email not verified. Please check your email for verification link.",
+                "code": "EMAIL_NOT_VERIFIED",
+                "email": user["email"]
+            },
         )
 
     # Create access token
@@ -211,3 +251,47 @@ async def search_users(
     users = [u for u in users if u["id"] != current_user["id"]]
 
     return users
+
+
+# ============================================
+# Email Verification Endpoints
+# ============================================
+
+
+@router.get("/verify-email")
+async def verify_email(token: str = Query(..., description="Verification token from email")):
+    """
+    Verify a user's email address using the token from the verification email.
+
+    - **token**: The verification token received in the email
+    """
+    result = email_service.verify_email_token(token)
+
+    if result["success"]:
+        return {"status": "success", "message": result["message"]}
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=result["message"]
+        )
+
+
+@router.post("/resend-verification")
+async def resend_verification(request: ResendVerificationRequest):
+    """
+    Resend the verification email to a user.
+
+    - **email**: Email address to send verification to
+    """
+    # Ensure verification tokens table exists
+    email_service.init_verification_tokens_table()
+
+    result = email_service.resend_verification_email(request.email)
+
+    if result["success"]:
+        return {"status": "success", "message": result["message"]}
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=result["message"]
+        )

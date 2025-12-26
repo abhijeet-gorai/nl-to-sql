@@ -24,3 +24,5 @@ dist/
 temp_*.csv
 
 backend/charts/*
+
+*test.ipynb
