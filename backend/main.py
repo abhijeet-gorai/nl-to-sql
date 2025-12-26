@@ -21,6 +21,7 @@ import auth
 import projects
 import token_usage
 import user_credentials
+import chat_sessions
 from dependencies import (
     require_read_access,
     require_write_access,
@@ -61,6 +62,7 @@ async def startup_event():
     projects.init_projects_tables()
     token_usage.init_token_usage_table()
     user_credentials.init_user_credentials_table()
+    chat_sessions.init_chat_sessions_table()
 
 
 # Include routers
@@ -632,6 +634,14 @@ async def chat_project(
                     usage_metadata=usage_metadata,
                 )
 
+        # Create/update chat session for history
+        chat_sessions.create_or_update_session(
+            project_id=project_id,
+            thread_id=request.thread_id,
+            user_id=user_id,
+            user_message=request.message,
+        )
+
         return StreamingResponse(
             agent.stream_question(
                 request.message,
@@ -682,6 +692,56 @@ async def get_session_messages(
 ):
     """Get individual message token usage for a session (requires read access)"""
     return token_usage.get_session_messages(session_id, limit)
+
+
+# ============================================
+# Chat Sessions Endpoints (History)
+# ============================================
+
+
+@app.get("/projects/{project_id}/chat-sessions")
+async def list_chat_sessions(
+    project_id: int,
+    access: dict = Depends(require_read_access),
+):
+    """Get all chat sessions for a project (for chat history)"""
+    return chat_sessions.get_project_sessions(project_id)
+
+
+@app.get("/projects/{project_id}/chat-sessions/{thread_id}")
+async def get_chat_session_messages(
+    project_id: int,
+    thread_id: str,
+    access: dict = Depends(require_read_access),
+):
+    """Get messages + charts for a specific chat session"""
+    # Verify session belongs to this project
+    session = chat_sessions.get_session(thread_id)
+    if not session or session["project_id"] != project_id:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    # Get messages from LangGraph checkpoint
+    result = await agent.get_thread_messages(thread_id)
+    result["session"] = session
+    return result
+
+
+@app.delete("/projects/{project_id}/chat-sessions/{thread_id}")
+async def delete_chat_session(
+    project_id: int,
+    thread_id: str,
+    access: dict = Depends(require_write_access),
+):
+    """Delete a chat session"""
+    # Verify session belongs to this project
+    session = chat_sessions.get_session(thread_id)
+    if not session or session["project_id"] != project_id:
+        raise HTTPException(status_code=404, detail="Session not found")
+    
+    deleted = chat_sessions.delete_session(thread_id)
+    if deleted:
+        return {"message": "Session deleted successfully"}
+    return {"message": "Session not found"}
 
 
 # ============================================

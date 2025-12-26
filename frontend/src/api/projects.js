@@ -120,3 +120,39 @@ export const getSessionTokenUsage = async (projectId, sessionId) => {
     const response = await apiClient.get(`/projects/${projectId}/sessions/${sessionId}/token-usage`);
     return response.data;
 };
+
+// ============================================
+// Chat Sessions (History)
+// ============================================
+
+/**
+ * List all chat sessions for a project
+ * @param {number} projectId
+ * @returns {Promise<Array>} - List of sessions
+ */
+export const listChatSessions = async (projectId) => {
+    const response = await apiClient.get(`/projects/${projectId}/chat-sessions`);
+    return response.data;
+};
+
+/**
+ * Get a specific chat session with messages and charts
+ * @param {number} projectId
+ * @param {string} threadId
+ * @returns {Promise<Object>} - { messages, session }
+ */
+export const getChatSession = async (projectId, threadId) => {
+    const response = await apiClient.get(`/projects/${projectId}/chat-sessions/${threadId}`);
+    return response.data;
+};
+
+/**
+ * Delete a chat session
+ * @param {number} projectId
+ * @param {string} threadId
+ * @returns {Promise<Object>}
+ */
+export const deleteChatSession = async (projectId, threadId) => {
+    const response = await apiClient.delete(`/projects/${projectId}/chat-sessions/${threadId}`);
+    return response.data;
+};

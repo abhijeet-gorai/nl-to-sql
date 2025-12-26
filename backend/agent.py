@@ -24,7 +24,7 @@ load_dotenv()
 class CustomState(AgentState):
     selected_tables: list[dict]
     base_url: str  # Base URL for generating chart image URLs
-    charts: list[dict]  # List of Vega-Lite chart specifications
+    charts: list[list[dict]]  # Charts per user turn - list of lists
 
 
 # ============================================
@@ -80,6 +80,47 @@ def get_llm_for_user(user_id: int = None) -> ChatWatsonx:
     )
     _llm_cache["default"] = {"llm": default_llm, "credentials_hash": "default"}
     return default_llm
+
+
+TITLE_GENERATION_PROMPT = """You are a title generator for chat conversations.
+Based only on the user's **first message**, generate a **short, clear, descriptive title** that summarizes the main topic or intent.
+**Rules:**
+* Use **3–7 words**
+* Be **specific and informative**, not generic
+* Do **not** use quotation marks
+* Do **not** include punctuation unless necessary
+* Do **not** mention "chat", "conversation", or "question"
+* Do **not** invent information beyond the message
+
+Output **only the title**, nothing else."""
+
+
+def generate_chat_title(user_message: str, user_id: int = None) -> str:
+    """
+    Generate a chat title using LLM based on the first user message.
+    Returns a short descriptive title.
+    """
+    try:
+        user_llm = get_llm_for_user(user_id)
+        
+        response = user_llm.invoke([
+            ("system", TITLE_GENERATION_PROMPT),
+            ("human", user_message)
+        ])
+        
+        title = response.content.strip()
+        # Clean up any quotes that might be returned
+        title = title.strip('"\'')
+        
+        # Fallback if title is too long or empty
+        if not title or len(title) > 100:
+            return user_message[:47] + "..." if len(user_message) > 50 else user_message
+        
+        return title
+    except Exception as e:
+        print(f"Error generating chat title: {e}")
+        # Fallback to simple truncation
+        return user_message[:47] + "..." if len(user_message) > 50 else user_message
 
 
 # Default LLM for backwards compatibility (tools still reference 'llm')
@@ -353,10 +394,14 @@ def generate_chart_frontend(
         if not vega_spec["title"]:
             del vega_spec["title"]
 
-        # Get current charts and append new one
-        current_charts = runtime.state.get("charts", [])
-        chart_number = len(current_charts)
-        updated_charts = current_charts + [vega_spec]
+        # Get current charts and append to current turn's list
+        all_charts = runtime.state.get("charts", [[]])
+        if not all_charts:
+            all_charts = [[]]
+        current_turn_charts = all_charts[-1]  # Last list is current turn
+        chart_number = len(current_turn_charts)
+        updated_turn_charts = current_turn_charts + [vega_spec]
+        updated_charts = all_charts[:-1] + [updated_turn_charts]
 
         return Command(
             update={
@@ -479,10 +524,14 @@ def generate_custom_chart_frontend(
         # Ensure data is set correctly (don't let user override)
         complete_spec["data"] = {"values": data_values}
 
-        # Get current charts and append new one
-        current_charts = runtime.state.get("charts", [])
-        chart_number = len(current_charts)
-        updated_charts = current_charts + [complete_spec]
+        # Get current charts and append to current turn's list
+        all_charts = runtime.state.get("charts", [[]])
+        if not all_charts:
+            all_charts = [[]]
+        current_turn_charts = all_charts[-1]  # Last list is current turn
+        chart_number = len(current_turn_charts)
+        updated_turn_charts = current_turn_charts + [complete_spec]
+        updated_charts = all_charts[:-1] + [updated_turn_charts]
 
         return Command(
             update={
@@ -741,12 +790,19 @@ async def stream_question(
         """
         # print(augmented_question)
         # Use astream_events to get granular updates including tokens
+        # Get existing charts from state to accumulate
+        try:
+            existing_state = await user_agent_executor.aget_state(config)
+            existing_charts = existing_state.values.get("charts", []) if existing_state.values else []
+        except:
+            existing_charts = []
+        
         async for event in user_agent_executor.astream_events(
             {
                 "messages": [("user", augmented_question)],
                 "selected_tables": selected_tables,
                 "base_url": base_url,
-                "charts": [],  # Initialize empty charts list
+                "charts": existing_charts + [[]],  # Append new empty list for this turn
             },
             config,
             version="v1",
@@ -826,13 +882,94 @@ async def stream_question(
                         + "\n"
                     )
 
-        # After streaming completes, get final state and yield charts if any
+        # After streaming completes, get final state and yield current turn's charts
         try:
             final_state = await user_agent_executor.aget_state(config)
-            charts = final_state.values.get("charts", [])
-            if charts:
-                yield json.dumps({"type": "charts", "charts": charts}) + "\n"
+            all_charts = final_state.values.get("charts", [])
+            # Only yield the current turn's charts (last list)
+            if all_charts and all_charts[-1]:
+                yield json.dumps({"type": "charts", "charts": all_charts[-1]}) + "\n"
         except Exception as e:
             print(f"Error retrieving charts from state: {e}")
-        state = await user_agent_executor.aget_state(config=config)
-        print(state.values.get("messages")[-1])
+
+
+async def get_thread_messages(thread_id: str) -> dict:
+    """
+    Retrieves all messages + charts from LangGraph checkpoint.
+    
+    LangGraph stores: HumanMessage → AIMessage (with tool_calls) → ToolMessage → AIMessage...
+    
+    Returns: {
+        "messages": [
+            {"role": "user", "content": "..."},
+            {"role": "ai", "content": "...", "charts": [...], "steps": [...]}
+        ]
+    }
+    """
+    config = {"configurable": {"thread_id": thread_id}}
+    
+    async with AsyncSqliteSaver.from_conn_string("checkpoint.db") as memory:
+        # Create a minimal agent executor just to access state
+        temp_executor = create_agent(
+            llm,
+            tools,
+            checkpointer=memory,
+            state_schema=CustomState,
+            system_prompt=SYSTEM_PROMPT,
+        )
+        
+        state = await temp_executor.aget_state(config)
+        
+        if not state or not state.values:
+            return {"messages": []}
+        
+        raw_messages = state.values.get("messages", [])
+        charts_by_turn = state.values.get("charts", [])  # list[list[dict]], one per user turn
+        
+        def extract_user_question(content: str) -> str:
+            """Extract user question from augmented prompt."""
+            import re
+            match = re.search(r"User Question:\s*(.+?)(?:\s*Instructions:|$)", content, re.DOTALL)
+            if match:
+                return match.group(1).strip()
+            return content  # Fallback to full content if pattern not found
+        
+        messages = []
+        current_steps = []
+        chart_turn_idx = 0
+        
+        for msg in raw_messages:
+            if msg.type == "human":
+                # User message - extract actual question from augmented prompt
+                user_content = extract_user_question(msg.content)
+                messages.append({"role": "user", "content": user_content})
+                current_steps = []
+                
+            elif msg.type == "ai":
+                if hasattr(msg, "tool_calls") and msg.tool_calls:
+                    # AI message with tool calls - collect as steps
+                    for tc in msg.tool_calls:
+                        current_steps.append({
+                            "tool": tc["name"],
+                            "input": tc.get("args", {}),
+                            "output": None  # Will be filled by ToolMessage
+                        })
+                else:
+                    # Final AI response with content
+                    turn_charts = charts_by_turn[chart_turn_idx] if chart_turn_idx < len(charts_by_turn) else []
+                    messages.append({
+                        "role": "ai",
+                        "content": msg.content,
+                        "charts": turn_charts,
+                        "steps": current_steps
+                    })
+                    current_steps = []
+                    chart_turn_idx += 1
+                    
+            elif msg.type == "tool":
+                # Tool response - attach to last step
+                if current_steps:
+                    current_steps[-1]["output"] = msg.content
+        
+        return {"messages": messages}
+

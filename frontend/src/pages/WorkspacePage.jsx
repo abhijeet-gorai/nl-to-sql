@@ -6,7 +6,7 @@ import { useAuth } from '../context/AuthContext';
 import { useProject } from '../context/ProjectContext';
 import * as tablesApi from '../api/tables';
 import { sendChatMessage } from '../api/chat';
-import { getSessionTokenUsage } from '../api/projects';
+import { getSessionTokenUsage, listChatSessions, getChatSession, deleteChatSession } from '../api/projects';
 
 // Components
 import ConnectionManager from '../components/ConnectionManager';
@@ -19,6 +19,7 @@ import ConfirmationModal from '../components/common/ConfirmationModal';
 import MembersPanel from '../components/MembersPanel';
 import ChangePasswordModal from '../components/common/ChangePasswordModal';
 import CredentialsModal from '../components/common/CredentialsModal';
+import ChatHistoryModal from '../components/common/ChatHistoryModal';
 
 import '../App.css';
 
@@ -66,6 +67,11 @@ const WorkspacePage = () => {
     const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
     const [showChangePassword, setShowChangePassword] = useState(false);
     const [showCredentials, setShowCredentials] = useState(false);
+
+    // Chat History State
+    const [showChatHistory, setShowChatHistory] = useState(false);
+    const [chatSessions, setChatSessions] = useState([]);
+    const [sessionsLoading, setSessionsLoading] = useState(false);
 
     const initialLoadRef = useRef(false);
 
@@ -539,6 +545,48 @@ const WorkspacePage = () => {
         setIsClearingChat(false);
     };
 
+    // --- Chat History Handlers ---
+    const fetchChatSessions = async () => {
+        if (!currentProject?.id) return;
+        setSessionsLoading(true);
+        try {
+            const data = await listChatSessions(currentProject.id);
+            setChatSessions(data);
+        } catch (err) {
+            console.error('Failed to fetch chat sessions:', err);
+        } finally {
+            setSessionsLoading(false);
+        }
+    };
+
+    const handleOpenChatHistory = () => {
+        fetchChatSessions();
+        setShowChatHistory(true);
+    };
+
+    const handleSelectSession = async (session) => {
+        try {
+            const data = await getChatSession(currentProject.id, session.thread_id);
+            setMessages(data.messages || []);
+            setThreadId(session.thread_id);
+            setSessionTokens(null);
+            setShowChatHistory(false);
+            setView('chat');
+        } catch (err) {
+            console.error('Failed to load session:', err);
+            alert('Failed to load conversation');
+        }
+    };
+
+    const handleDeleteSession = async (session) => {
+        try {
+            await deleteChatSession(currentProject.id, session.thread_id);
+            fetchChatSessions();
+        } catch (err) {
+            console.error('Failed to delete session:', err);
+        }
+    };
+
     const goBack = () => {
         navigate('/projects');
     };
@@ -604,6 +652,7 @@ const WorkspacePage = () => {
                 onUpload={canWrite ? handleFileUpload : null}
                 onConnect={canWrite ? () => setShowConnectionManager(true) : null}
                 onBrowse={canWrite ? () => setShowTableBrowser(true) : null}
+                onChatHistory={handleOpenChatHistory}
                 onToggleTable={handleTableToggle}
                 onToggleGroup={handleGroupToggle}
                 onEditTable={canWrite ? handleEditTable : null}
@@ -702,6 +751,17 @@ const WorkspacePage = () => {
             {showCredentials && (
                 <CredentialsModal
                     onClose={() => setShowCredentials(false)}
+                />
+            )}
+
+            {/* Chat History Modal */}
+            {showChatHistory && (
+                <ChatHistoryModal
+                    sessions={chatSessions}
+                    onSelect={handleSelectSession}
+                    onDelete={handleDeleteSession}
+                    onClose={() => setShowChatHistory(false)}
+                    loading={sessionsLoading}
                 />
             )}
         </div>

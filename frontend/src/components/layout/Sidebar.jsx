@@ -2,7 +2,7 @@ import React, { useState, useMemo } from 'react';
 import {
     Database, Upload, Link, Sun, Moon,
     ChevronRight, ChevronDown, Check, Pencil, Trash2,
-    CheckSquare, Square, MinusSquare, X, ArrowLeft, FolderKanban
+    CheckSquare, Square, MinusSquare, X, ArrowLeft, FolderKanban, History
 } from 'lucide-react';
 import './Sidebar.css';
 
@@ -12,6 +12,7 @@ const Sidebar = ({
     onUpload,
     onConnect,
     onBrowse,
+    onChatHistory,
     onToggleTable,
     onEditTable,
     onDeleteTable,
@@ -167,6 +168,17 @@ const Sidebar = ({
                 >
                     <Database size={16} />
                     <span>Browse Tables</span>
+                </button>
+            )}
+
+            {onChatHistory && (
+                <button
+                    className="secondary-button"
+                    onClick={onChatHistory}
+                    style={{ marginTop: '0.5rem' }}
+                >
+                    <History size={16} />
+                    <span>Chat History</span>
                 </button>
             )}
 

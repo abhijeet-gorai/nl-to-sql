@@ -1,6 +1,6 @@
 .projects-page {
     min-height: 100vh;
-    background: var(--bg-primary);
+    background: var(--bg-app);
     display: flex;
     flex-direction: column;
 }
