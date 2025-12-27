@@ -234,6 +234,9 @@ async def register_table_project(
         if os.path.exists(request.file_path):
             os.remove(request.file_path)
 
+        # Invalidate tables cache for this project
+        query_router.invalidate_tables_cache(project_id)
+
         return {"status": success, "table_name": request.metadata["table_name"]}
     except Exception as e:
         logger.error(f"register_table_project error: {e}", exc_info=True)
@@ -314,6 +317,9 @@ async def delete_project_table(
                 success = await me.delete_external_table_by_name(table_name)
                 if not success:
                     raise HTTPException(status_code=404, detail="Table not found")
+
+        # Invalidate tables cache for this project
+        query_router.invalidate_tables_cache(project_id)
 
         return {"status": "success", "table_name": table_name}
     except HTTPException:
@@ -541,11 +547,16 @@ async def sync_tables_project(
             t for t in synced_tables if t["table_name"] in synced_table_names
         ]
 
-        return {
+        result = {
             "status": "success",
             "synced_count": len(request.tables),
             "tables": synced_tables,
         }
+
+        # Invalidate tables cache for this project
+        query_router.invalidate_tables_cache(project_id)
+
+        return result
     except Exception as e:
         logger.error(f"sync_tables_project error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -661,15 +672,13 @@ async def chat_project(
                     usage_metadata=usage_metadata,
                 ))
 
-        # Create/update chat session for history
-        print("Creating or updating chat session")
-        await chat_sessions.create_or_update_session(
+        # Create/update chat session for history (run in background, non-blocking)
+        asyncio.create_task(chat_sessions.create_or_update_session(
             project_id=project_id,
             thread_id=request.thread_id,
             user_id=user_id,
             user_message=request.message,
-        )
-        print("Chat session created or updated")
+        ))
 
         return StreamingResponse(
             agent.stream_question(

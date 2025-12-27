@@ -8,10 +8,14 @@ from typing import List, Dict, Optional
 import sqlglot
 import json
 from sqlglot import exp
+from cachetools import TTLCache
 
 import connection_manager as cm
 import db
 from database_config import fetch, fetchrow
+
+# Cache for project tables - TTL of 60 seconds, max 100 projects
+_project_tables_cache = TTLCache(maxsize=100, ttl=60)
 
 
 def parse_query_tables(query: str) -> List[Dict[str, Optional[str]]]:
@@ -331,8 +335,18 @@ async def build_table_context_federated(table_names: List[str]) -> str:
     return context
 
 
-async def get_all_available_tables(project_id: int = None) -> List[Dict]:
-    """Get all available tables (CSV + External) for selection, optionally filtered by project"""
+async def get_all_available_tables(project_id: int = None, use_cache: bool = True) -> List[Dict]:
+    """Get all available tables (CSV + External) for selection, optionally filtered by project
+    
+    Args:
+        project_id: Optional project ID to filter tables
+        use_cache: If True, use cached results (default). Set to False to bypass cache.
+    """
+    # Check cache first
+    cache_key = f"project_{project_id}" if project_id else "all"
+    if use_cache and cache_key in _project_tables_cache:
+        return _project_tables_cache[cache_key]
+    
     tables = []
 
     # Get CSV tables
@@ -396,4 +410,20 @@ async def get_all_available_tables(project_id: int = None) -> List[Dict]:
             del table["columns_metadata"]
         tables.append(table)
 
+    # Store in cache
+    _project_tables_cache[cache_key] = tables
+    
     return tables
+
+
+def invalidate_tables_cache(project_id: int = None):
+    """Invalidate the tables cache for a specific project or all projects
+    
+    Call this when tables are added, deleted, or modified.
+    """
+    if project_id:
+        cache_key = f"project_{project_id}"
+        if cache_key in _project_tables_cache:
+            del _project_tables_cache[cache_key]
+    else:
+        _project_tables_cache.clear()
