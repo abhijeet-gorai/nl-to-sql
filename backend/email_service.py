@@ -1,11 +1,12 @@
 """
 Email Service Module
-Handles sending verification emails using Gmail SMTP
+Handles sending verification emails using Brevo API (with SMTP fallback)
 """
 
 import smtplib
 import os
 import secrets
+import requests
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from datetime import datetime, timedelta, timezone
@@ -16,6 +17,10 @@ from database_config import get_connection, execute, fetchrow
 # Email configuration from environment
 GMAIL_EMAIL_ID = os.getenv("GMAIL_EMAIL_ID")
 GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD")
+
+# Brevo API configuration
+BREVO_API_KEY = os.getenv("BREVO_API_KEY")
+BREVO_SENDER_EMAIL = os.getenv("BREVO_SENDER_EMAIL")
 
 # Frontend URL for verification links
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:5173")
@@ -149,24 +154,8 @@ async def verify_email_token(token: str) -> dict:
     return {"success": False, "message": "Failed to verify email"}
 
 
-def send_verification_email(email: str, username: str, token: str) -> bool:
-    """
-    Send a verification email to the user.
-    Returns True if email was sent successfully, False otherwise.
-    """
-    if not GMAIL_EMAIL_ID or not GMAIL_APP_PASSWORD:
-        print("Warning: Gmail credentials not configured. Email not sent.")
-        return False
-
-    verification_link = f"{FRONTEND_URL}/verify-email?token={token}"
-
-    # Create the email
-    message = MIMEMultipart("alternative")
-    message["Subject"] = "Verify your DataTalk account"
-    message["From"] = GMAIL_EMAIL_ID
-    message["To"] = email
-
-    # Plain text version
+def _get_email_content(username: str, verification_link: str) -> tuple[str, str]:
+    """Generate plain text and HTML email content"""
     text_content = f"""
 Hello {username},
 
@@ -183,7 +172,6 @@ Best regards,
 The DataTalk Team
 """
 
-    # HTML version
     html_content = f"""
 <!DOCTYPE html>
 <html>
@@ -258,6 +246,74 @@ The DataTalk Team
 </body>
 </html>
 """
+    return text_content, html_content
+
+
+def send_verification_email(email: str, username: str, token: str) -> bool:
+    """
+    Send a verification email using Brevo API.
+    Falls back to SMTP if Brevo is not configured.
+    Returns True if email was sent successfully, False otherwise.
+    """
+    verification_link = f"{FRONTEND_URL}/verify-email?token={token}"
+    text_content, html_content = _get_email_content(username, verification_link)
+    
+    # Try Brevo API first
+    if BREVO_API_KEY and BREVO_SENDER_EMAIL:
+        try:
+            response = requests.post(
+                "https://api.brevo.com/v3/smtp/email",
+                headers={
+                    "api-key": BREVO_API_KEY,
+                    "Content-Type": "application/json",
+                    "accept": "application/json"
+                },
+                json={
+                    "sender": {
+                        "name": "DataTalk",
+                        "email": BREVO_SENDER_EMAIL
+                    },
+                    "to": [{"email": email, "name": username}],
+                    "subject": "Verify your DataTalk account",
+                    "textContent": text_content,
+                    "htmlContent": html_content
+                },
+                timeout=30
+            )
+            
+            if response.status_code in [200, 201, 202]:
+                print(f"Verification email sent to {email} via Brevo")
+                return True
+            else:
+                print(f"Brevo API error: {response.status_code} - {response.text}")
+                # Fall through to SMTP fallback
+                
+        except Exception as e:
+            print(f"Brevo API failed: {e}")
+            # Fall through to SMTP fallback
+    
+    # Fallback to SMTP
+    print("Falling back to SMTP")
+    return send_verification_email_smtp(email, username, token)
+
+
+def send_verification_email_smtp(email: str, username: str, token: str) -> bool:
+    """
+    Send a verification email using Gmail SMTP (fallback).
+    Returns True if email was sent successfully, False otherwise.
+    """
+    if not GMAIL_EMAIL_ID or not GMAIL_APP_PASSWORD:
+        print("Warning: Neither Brevo nor Gmail credentials configured. Email not sent.")
+        return False
+
+    verification_link = f"{FRONTEND_URL}/verify-email?token={token}"
+    text_content, html_content = _get_email_content(username, verification_link)
+
+    # Create the email
+    message = MIMEMultipart("alternative")
+    message["Subject"] = "Verify your DataTalk account"
+    message["From"] = GMAIL_EMAIL_ID
+    message["To"] = email
 
     message.attach(MIMEText(text_content, "plain"))
     message.attach(MIMEText(html_content, "html"))
@@ -267,7 +323,7 @@ The DataTalk Team
         with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
             server.login(GMAIL_EMAIL_ID, GMAIL_APP_PASSWORD)
             server.sendmail(GMAIL_EMAIL_ID, email, message.as_string())
-        print(f"Verification email sent to {email}")
+        print(f"Verification email sent to {email} via SMTP")
         return True
 
     except smtplib.SMTPAuthenticationError as e:
@@ -275,7 +331,7 @@ The DataTalk Team
         print("Make sure you're using an App Password, not your regular Gmail password.")
         return False
     except Exception as e:
-        print(f"Failed to send verification email: {e}")
+        print(f"Failed to send verification email via SMTP: {e}")
         return False
 
 
