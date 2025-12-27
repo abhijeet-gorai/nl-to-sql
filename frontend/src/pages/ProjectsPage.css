@@ -178,6 +178,8 @@
     padding: 1.5rem;
     cursor: pointer;
     transition: all 0.2s ease;
+    display: flex;
+    flex-direction: column;
 }
 
 .project-card:hover {
@@ -248,6 +250,7 @@
     justify-content: space-between;
     padding-top: 1rem;
     border-top: 1px solid var(--border-color);
+    margin-top: auto;
 }
 
 .project-meta-row {
