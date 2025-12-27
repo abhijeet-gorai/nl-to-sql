@@ -65,10 +65,10 @@ def analyze_csv(file_path: str, original_filename: str) -> Dict:
     try:
         # Read a subset to infer types and preview
         df_preview = pd.read_csv(file_path, nrows=5)
-        df_preview.columns = [c.strip().replace(" ", "_") for c in df_preview.columns]
+        df_preview.columns = [c.strip().replace(" ", "_").lower() for c in df_preview.columns]
         # Read 0 rows to get columns cheaply
         df_headers = pd.read_csv(file_path, nrows=0)
-        df_headers.columns = [c.strip().replace(" ", "_") for c in df_headers.columns]
+        df_headers.columns = [c.strip().replace(" ", "_").lower() for c in df_headers.columns]
 
         columns = []
         for col in df_headers.columns:
@@ -119,7 +119,7 @@ async def register_table(file_path: str, metadata: Dict, project_id: int = None)
 
         # Sanitize columns in DF to match metadata names if we allow renaming later
         # For now, just ensuring valid SQL identifiers
-        df.columns = [c.strip().replace(" ", "_") for c in df.columns]
+        df.columns = [c.strip().replace(" ", "_").lower() for c in df.columns]
 
         # Use SQLAlchemy for pandas to_sql with PostgreSQL
         from sqlalchemy import create_engine
