@@ -283,7 +283,7 @@ async def build_table_context_federated(table_names: List[str]) -> str:
 
     # Add CSV tables context
     if csv_tables:
-        context += "=== LOCAL CSV TABLES ===\n"
+        context += "=== POSTGRES TABLES ===\n"
         context += await db.get_table_context(csv_tables)
         context += "\n"
 
