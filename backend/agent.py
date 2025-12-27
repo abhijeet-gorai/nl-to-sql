@@ -623,6 +623,7 @@ Users can connect multiple types of data sources:
 - Local CSV files
 - External databases (PostgreSQL, MySQL, IBM Db2, Oracle)
 You will be provided with table schemas and metadata to help you write accurate queries.
+When using Postgres DB, use double quotes (") for column names if the column name also contains uppercase characters.
 
 ## Chart Generation - IMPORTANT
 When creating visualizations, you have TWO sets of tools:
