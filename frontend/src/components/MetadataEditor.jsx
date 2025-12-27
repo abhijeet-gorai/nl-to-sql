@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Check, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Check, ChevronLeft, ChevronRight, Loader } from 'lucide-react';
 import './MetadataEditor.css';
 
 const MetadataEditor = ({
@@ -10,6 +10,7 @@ const MetadataEditor = ({
 }) => {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [editedTables, setEditedTables] = useState(tables);
+  const [saving, setSaving] = useState(false);
 
   const currentTable = editedTables[currentIndex];
   const isExternal = currentTable.source_type === 'external' || currentTable.schema_name;
@@ -40,8 +41,13 @@ const MetadataEditor = ({
     }
   };
 
-  const handleSave = () => {
-    onSave(isMultiple ? editedTables : editedTables[0]);
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await onSave(isMultiple ? editedTables : editedTables[0]);
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -141,8 +147,12 @@ const MetadataEditor = ({
           <button className="btn btn-ghost" onClick={onCancel}>
             Cancel
           </button>
-          <button className="btn btn-primary" onClick={handleSave}>
-            <Check size={18} />
+          <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
+            {saving ? (
+              <Loader className="spin" size={18} />
+            ) : (
+              <Check size={18} />
+            )}
             {isMultiple ? 'Save All' : (currentTable.isEditing ? 'Save Changes' : 'Complete Registration')}
           </button>
         </div>

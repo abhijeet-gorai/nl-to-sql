@@ -22,6 +22,16 @@ const formatDate = (dateString) => {
 
 const ChatHistoryModal = ({ sessions, onSelect, onDelete, onClose, loading }) => {
     const [deletingId, setDeletingId] = useState(null);
+    const [selectingId, setSelectingId] = useState(null);
+
+    const handleSelect = async (session) => {
+        setSelectingId(session.thread_id);
+        try {
+            await onSelect(session);
+        } finally {
+            setSelectingId(null);
+        }
+    };
 
     const handleDelete = async (e, session) => {
         e.stopPropagation();
@@ -66,12 +76,17 @@ const ChatHistoryModal = ({ sessions, onSelect, onDelete, onClose, loading }) =>
                             {sessions.map((session) => (
                                 <div
                                     key={session.thread_id}
-                                    className="session-item"
-                                    onClick={() => onSelect(session)}
+                                    className={`session-item ${selectingId === session.thread_id ? 'loading' : ''}`}
+                                    onClick={() => !selectingId && handleSelect(session)}
+                                    style={{ pointerEvents: selectingId ? 'none' : 'auto' }}
                                 >
                                     <div className="session-content">
                                         <div className="session-title">
-                                            {session.title || 'New Chat'}
+                                            {selectingId === session.thread_id ? (
+                                                <><Loader className="spin" size={14} /> Loading...</>
+                                            ) : (
+                                                session.title || 'New Chat'
+                                            )}
                                         </div>
                                         <div className="session-meta">
                                             <Clock size={12} />
