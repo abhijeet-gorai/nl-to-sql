@@ -218,6 +218,12 @@ const WorkspacePage = () => {
 
         const files = e.dataTransfer.files;
         if (files && files.length > 0) {
+            // Check for multiple files
+            if (files.length > 1) {
+                alert('Please drop only one CSV file at a time.');
+                return;
+            }
+
             const file = files[0];
             if (!file.name.toLowerCase().endsWith('.csv')) {
                 alert('Please drop a CSV file.');
