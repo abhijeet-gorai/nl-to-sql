@@ -102,6 +102,13 @@ body {
   transition: background-color 0.3s ease, color 0.3s ease;
 }
 
+/* Allow scrolling on login/register pages */
+body.allow-scroll {
+  overflow: auto;
+  height: auto;
+  min-height: 100vh;
+}
+
 img {
   width: 100%;
 }

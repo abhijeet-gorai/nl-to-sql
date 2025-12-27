@@ -34,6 +34,14 @@ const LoginPage = () => {
         localStorage.setItem('theme', theme);
     }, [theme]);
 
+    // Enable scrolling on login page
+    useEffect(() => {
+        document.body.classList.add('allow-scroll');
+        return () => {
+            document.body.classList.remove('allow-scroll');
+        };
+    }, []);
+
     const toggleTheme = () => {
         setTheme(prev => prev === 'dark' ? 'light' : 'dark');
     };

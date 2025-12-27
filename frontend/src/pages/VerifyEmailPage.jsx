@@ -21,6 +21,14 @@ const VerifyEmailPage = () => {
         localStorage.setItem('theme', theme);
     }, [theme]);
 
+    // Enable scrolling on this page
+    useEffect(() => {
+        document.body.classList.add('allow-scroll');
+        return () => {
+            document.body.classList.remove('allow-scroll');
+        };
+    }, []);
+
     useEffect(() => {
         if (!token) {
             setStatus('no-token');

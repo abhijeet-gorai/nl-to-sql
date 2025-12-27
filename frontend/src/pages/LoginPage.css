@@ -1,11 +1,12 @@
 .login-page {
     min-height: 100vh;
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: center;
     background: var(--bg-app);
-    padding: 1.5rem;
+    padding: 2rem 1.5rem;
     position: relative;
+    overflow-y: auto;
 }
 
 .theme-toggle-btn {
@@ -40,6 +41,7 @@
     padding: 2.5rem;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.12);
     border: 1px solid var(--border-color);
+    margin: auto 0;
 }
 
 .login-header {
