@@ -12,6 +12,10 @@ from typing import List, Dict, Optional, Any
 import shutil
 import os
 import uuid
+import logging
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 # Import our local modules
 import db
@@ -211,6 +215,7 @@ async def analyze_file_project(
 
         return db_result
     except Exception as e:
+        logger.error(f"analyze_file_project error: {e}", exc_info=True)
         if os.path.exists(temp_filename):
             os.remove(temp_filename)
         raise HTTPException(status_code=500, detail=str(e))
@@ -231,6 +236,7 @@ async def register_table_project(
 
         return {"status": success, "table_name": request.metadata["table_name"]}
     except Exception as e:
+        logger.error(f"register_table_project error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -277,6 +283,7 @@ async def update_project_table(
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"update_table_project error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -312,6 +319,7 @@ async def delete_project_table(
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"delete_project_table error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -455,6 +463,7 @@ async def list_schemas_project(
         connector.disconnect()
         return {"schemas": schemas}
     except Exception as e:
+        logger.error(f"list_schemas_project error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -477,6 +486,7 @@ async def list_tables_project(
         tables = await me.discover_tables(connection_id, schema)
         return {"tables": tables}
     except Exception as e:
+        logger.error(f"list_tables_project error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -500,6 +510,7 @@ async def get_table_metadata_project(
         metadata = await me.extract_table_metadata(connection_id, schema, table_name)
         return metadata
     except Exception as e:
+        logger.error(f"get_table_metadata_project error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -521,6 +532,7 @@ async def sync_tables_project(
     try:
         success = await me.sync_external_tables(connection_id, request.tables, project_id)
         if not success:
+            logger.error("sync_tables_project failed")
             raise HTTPException(status_code=500, detail="Failed to sync tables")
 
         synced_tables = await me.get_external_tables(connection_id, project_id)
@@ -535,6 +547,7 @@ async def sync_tables_project(
             "tables": synced_tables,
         }
     except Exception as e:
+        logger.error(f"sync_tables_project error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -568,6 +581,7 @@ async def preview_table_project(
             "row_count": len(df),
         }
     except Exception as e:
+        logger.error(f"preview_table_project error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -671,6 +685,7 @@ async def chat_project(
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"chat_endpoint error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -804,6 +819,7 @@ async def save_groq_credentials(
     )
     
     if not success:
+        logger.error("save_groq_credentials failed")
         raise HTTPException(status_code=500, detail="Failed to save credentials")
     
     # Invalidate cached LLM for this user
