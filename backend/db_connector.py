@@ -8,6 +8,8 @@ from typing import List, Dict
 import pandas as pd
 from dataclasses import dataclass
 
+from sql_utils import is_read_only_sql
+
 @dataclass
 class ConnectionConfig:
     """Configuration for database connection"""
@@ -224,10 +226,9 @@ class PostgreSQLConnector(DatabaseConnector):
         if not self.connection:
             self.connect()
         
-        # Security: Ensure read-only
-        query_upper = query.strip().upper()
-        if not query_upper.startswith('SELECT'):
-            raise ValueError("Only SELECT queries are allowed")
+        # Security: Ensure read-only using sqlglot validation
+        if not is_read_only_sql(query, dialect="postgres"):
+            raise ValueError("Only read-only SELECT queries are allowed")
         
         return pd.read_sql_query(query, self.connection)
     
@@ -394,9 +395,9 @@ class DB2Connector(DatabaseConnector):
         if not self.connection:
             self.connect()
         
-        query_upper = query.strip().upper()
-        if not query_upper.startswith('SELECT'):
-            raise ValueError("Only SELECT queries are allowed")
+        # Security: Ensure read-only using sqlglot validation
+        if not is_read_only_sql(query, dialect="db2"):
+            raise ValueError("Only read-only SELECT queries are allowed")
         
         # Use ibm_db_dbi for pandas compatibility
         conn_dbi = self.ibm_db_dbi.Connection(self.connection)

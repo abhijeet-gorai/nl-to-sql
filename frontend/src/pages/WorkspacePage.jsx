@@ -602,6 +602,10 @@ const WorkspacePage = () => {
                             } else if (data.type === 'charts') {
                                 // Store chart specifications in the message
                                 lastMsg.charts = data.charts;
+                            } else if (data.type === 'error') {
+                                // Handle streaming error from agent
+                                lastMsg.content = (lastMsg.content || '') + `\n\n⚠️ **Error:** ${data.error}`;
+                                lastMsg.hasError = true;
                             }
                             newMessages[lastMsgIndex] = lastMsg;
                             return newMessages;

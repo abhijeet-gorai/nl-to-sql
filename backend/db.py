@@ -7,6 +7,7 @@ from typing import List, Dict, Optional
 import asyncpg
 
 from database_config import get_connection, execute, fetch, fetchrow, fetchval, get_connection_string
+from sql_utils import is_read_only_sql
 
 METADATA_TABLE = "app_metadata"
 
@@ -310,8 +311,8 @@ def get_raw_dataframe(query: str) -> Optional[pd.DataFrame]:
     """
     Executes a read-only SQL query and returns the pandas DataFrame directly.
     """
-    if not query.strip().lower().startswith("select"):
-        return None
+    if not is_read_only_sql(query, dialect="postgres"):
+        raise ValueError("Only read-only SELECT queries are allowed")
 
     from sqlalchemy import create_engine
 

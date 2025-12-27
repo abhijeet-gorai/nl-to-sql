@@ -169,7 +169,10 @@ def execute_query(query: str, runtime: ToolRuntime) -> str:
         df = query_router.execute_federated_query(query, selected_tables)
         if df is None or df.empty:
             return "Query returned no results."
-        return df.to_markdown(index=False)
+        output = df.to_markdown(index=False)
+        if len(df)>500:
+            output = "Query returned more than 500 rows. Showing top 500 rows: \n" + output
+        return output
     except Exception as e:
         return f"Error executing query: {str(e)}"
 
@@ -604,7 +607,7 @@ tools = [
 
 # Validate that we have the necessary credentials
 def validate_creds():
-    if not os.getenv("GROQ_APIKEY"):
+    if not os.getenv("GROQ_API_KEY"):
         print("WARNING: Groq credentials not found in environment variables.")
 
 
@@ -831,90 +834,106 @@ async def stream_question(
         except:
             existing_charts = []
         
-        async for event in user_agent_executor.astream_events(
-            {
-                "messages": [("user", augmented_question)],
-                "selected_tables": selected_tables,
-                "base_url": base_url,
-                "charts": existing_charts + [[]],  # Append new empty list for this turn
-            },
-            config,
-            version="v1",
-        ):
-            kind = event["event"]
-            # Log token usage for each AI message completion
-            if kind == "on_chat_model_end" and token_logger:
-                try:
-                    output = event.get("data", {}).get("output")
-                    # Navigate to the message object in generations
-                    if output and "generations" in output and output["generations"]:
-                        generation = (
-                            output["generations"][0][0]
-                            if output["generations"][0]
-                            else None
-                        )
-                        if generation and "message" in generation:
-                            message = generation["message"]
-                            if (
-                                hasattr(message, "usage_metadata")
-                                and message.usage_metadata
-                            ):
-                                # Use AIMessage's id if available, otherwise generate UUID
-                                message_id = getattr(message, "id", None)
-                                if not message_id:
-                                    message_id = str(uuid.uuid4())
-                                token_logger(message_id, dict(message.usage_metadata))
-                except Exception as e:
-                    print(f"Failed to log token usage: {e}")
+        try:
+            async for event in user_agent_executor.astream_events(
+                {
+                    "messages": [("user", augmented_question)],
+                    "selected_tables": selected_tables,
+                    "base_url": base_url,
+                    "charts": existing_charts + [[]],  # Append new empty list for this turn
+                },
+                config,
+                version="v1",
+            ):
+                kind = event["event"]
+                # Log token usage for each AI message completion
+                if kind == "on_chat_model_end" and token_logger:
+                    try:
+                        output = event.get("data", {}).get("output")
+                        # Navigate to the message object in generations
+                        if output and "generations" in output and output["generations"]:
+                            generation = (
+                                output["generations"][0][0]
+                                if output["generations"][0]
+                                else None
+                            )
+                            if generation and "message" in generation:
+                                message = generation["message"]
+                                if (
+                                    hasattr(message, "usage_metadata")
+                                    and message.usage_metadata
+                                ):
+                                    # Use AIMessage's id if available, otherwise generate UUID
+                                    message_id = getattr(message, "id", None)
+                                    if not message_id:
+                                        message_id = str(uuid.uuid4())
+                                    token_logger(message_id, dict(message.usage_metadata))
+                    except Exception as e:
+                        print(f"Failed to log token usage: {e}")
 
-            # Stream Tokens
-            if kind == "on_chat_model_stream":
-                reasoning_content = event["data"]["chunk"].additional_kwargs.get(
-                    "reasoning_content", ""
-                )
-                if reasoning_content:
-                    print(reasoning_content, end="")
-                content = event["data"]["chunk"].content
-                if content:
-                    yield json.dumps({"type": "token", "content": content}) + "\n"
-
-            # Tool Start
-            elif kind == "on_tool_start":
-                # Filter out internal tools or check name if needed
-                if event["name"] not in ["_Exception"]:
-                    yield (
-                        json.dumps(
-                            {
-                                "type": "tool_start",
-                                "tool": event["name"],
-                                "input": event["data"].get("input"),
-                            }
-                        )
-                        + "\n"
+                # Stream Tokens
+                if kind == "on_chat_model_stream":
+                    reasoning_content = event["data"]["chunk"].additional_kwargs.get(
+                        "reasoning_content", ""
                     )
+                    if reasoning_content:
+                        print(reasoning_content, end="")
+                    content = event["data"]["chunk"].content
+                    if content:
+                        yield json.dumps({"type": "token", "content": content}) + "\n"
 
-            # Tool End
-            elif kind == "on_tool_end":
-                if event["name"] not in ["_Exception"]:
-                    output = event["data"].get("output")
-                    if isinstance(output, Command):
-                        output_content = output.update.get("messages")[-1].content
-                    else:
-                        output_content = (
-                            output.content
-                            if hasattr(output, "content")
-                            else str(output)
+                # Tool Start
+                elif kind == "on_tool_start":
+                    # Filter out internal tools or check name if needed
+                    if event["name"] not in ["_Exception"]:
+                        yield (
+                            json.dumps(
+                                {
+                                    "type": "tool_start",
+                                    "tool": event["name"],
+                                    "input": event["data"].get("input"),
+                                }
+                            )
+                            + "\n"
                         )
-                    yield (
-                        json.dumps(
-                            {
-                                "type": "tool_end",
-                                "tool": event["name"],
-                                "output": output_content,
-                            }
+
+                # Tool End
+                elif kind == "on_tool_end":
+                    if event["name"] not in ["_Exception"]:
+                        output = event["data"].get("output")
+                        if isinstance(output, Command):
+                            output_content = output.update.get("messages")[-1].content
+                        else:
+                            output_content = (
+                                output.content
+                                if hasattr(output, "content")
+                                else str(output)
+                            )
+                        yield (
+                            json.dumps(
+                                {
+                                    "type": "tool_end",
+                                    "tool": event["name"],
+                                    "output": output_content,
+                                }
+                            )
+                            + "\n"
                         )
-                        + "\n"
-                    )
+
+        except Exception as e:
+            # Stream the error to the frontend
+            error_message = str(e)
+            # # Provide user-friendly messages for common errors
+            # if "rate_limit" in error_message.lower() or "rate limit" in error_message.lower():
+            #     error_message = "Rate limit exceeded. Please wait a moment and try again."
+            # elif "token" in error_message.lower() and ("limit" in error_message.lower() or "exceed" in error_message.lower()):
+            #     error_message = "Token limit exceeded. Try a shorter message or start a new chat."
+            # elif "context length" in error_message.lower():
+            #     error_message = "Context length exceeded. Please start a new chat session."
+            
+            print(f"Agent streaming error: {e}")
+            yield json.dumps({"type": "error", "error": error_message}) + "\n"
+            return  # Stop further processing
 
         # After streaming completes, get final state and yield current turn's charts
         try:
