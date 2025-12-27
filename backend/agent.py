@@ -22,6 +22,24 @@ import json
 load_dotenv()
 
 
+def df_to_json_safe_records(df: pd.DataFrame) -> list[dict]:
+    """
+    Convert a DataFrame to a list of records, converting Timestamp/datetime
+    objects to ISO strings for JSON serialization.
+    """
+    # Convert datetime columns to ISO strings
+    df_copy = df.copy()
+    for col in df_copy.columns:
+        if pd.api.types.is_datetime64_any_dtype(df_copy[col]):
+            df_copy[col] = df_copy[col].dt.strftime('%Y-%m-%dT%H:%M:%S')
+        elif df_copy[col].dtype == object:
+            # Handle mixed types that might contain Timestamps
+            df_copy[col] = df_copy[col].apply(
+                lambda x: x.isoformat() if hasattr(x, 'isoformat') else x
+            )
+    return df_copy.to_dict(orient="records")
+
+
 class CustomState(AgentState):
     selected_tables: list[dict]
     base_url: str  # Base URL for generating chart image URLs
@@ -354,8 +372,8 @@ def generate_chart_frontend(
                 }
             )
 
-        # Convert DataFrame to list of records for Vega-Lite
-        data_values = df[[x_col, y_col]].to_dict(orient="records")
+        # Convert DataFrame to list of records for Vega-Lite (with Timestamp handling)
+        data_values = df_to_json_safe_records(df[[x_col, y_col]])
 
         # Map chart types to Vega-Lite mark types
         mark_type_map = {
@@ -522,8 +540,8 @@ def generate_custom_chart_frontend(
                 }
             )
 
-        # Convert DataFrame to list of records
-        data_values = df.to_dict(orient="records")
+        # Convert DataFrame to list of records (with Timestamp handling)
+        data_values = df_to_json_safe_records(df)
 
         # Build complete Vega-Lite specification
         complete_spec = {

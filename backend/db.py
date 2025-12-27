@@ -65,8 +65,10 @@ def analyze_csv(file_path: str, original_filename: str) -> Dict:
     try:
         # Read a subset to infer types and preview
         df_preview = pd.read_csv(file_path, nrows=5)
+        df_preview.columns = [c.strip().replace(" ", "_") for c in df_preview.columns]
         # Read 0 rows to get columns cheaply
         df_headers = pd.read_csv(file_path, nrows=0)
+        df_headers.columns = [c.strip().replace(" ", "_") for c in df_headers.columns]
 
         columns = []
         for col in df_headers.columns:
@@ -311,12 +313,8 @@ def get_raw_dataframe(query: str) -> Optional[pd.DataFrame]:
     if not query.strip().lower().startswith("select"):
         return None
 
-    try:
-        from sqlalchemy import create_engine
+    from sqlalchemy import create_engine
 
-        engine = create_engine(get_connection_string().replace("postgresql://", "postgresql+psycopg://"))
-        df = pd.read_sql_query(query, engine)
-        return df
-    except Exception as e:
-        print(f"Error executing query: {e}")
-        return None
+    engine = create_engine(get_connection_string().replace("postgresql://", "postgresql+psycopg://"))
+    df = pd.read_sql_query(query, engine)
+    return df
