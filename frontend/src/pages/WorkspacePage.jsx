@@ -1,6 +1,6 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Menu } from 'lucide-react';
+import { Menu, Upload } from 'lucide-react';
 
 import { useAuth } from '../context/AuthContext';
 import { useProject } from '../context/ProjectContext';
@@ -72,6 +72,10 @@ const WorkspacePage = () => {
     const [showChatHistory, setShowChatHistory] = useState(false);
     const [chatSessions, setChatSessions] = useState([]);
     const [sessionsLoading, setSessionsLoading] = useState(false);
+
+    // Drag and Drop State
+    const [isDragging, setIsDragging] = useState(false);
+    const dragCounter = useRef(0);
 
     const initialLoadRef = useRef(false);
 
@@ -173,9 +177,79 @@ const WorkspacePage = () => {
             alert("Failed to upload/analyze file.");
         } finally {
             setIsUploading(false);
-            e.target.value = null;
+            if (e.target) e.target.value = null;
         }
     };
+
+    // Drag and Drop Handlers
+    const handleDragEnter = useCallback((e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dragCounter.current++;
+        if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+            setIsDragging(true);
+        }
+    }, []);
+
+    const handleDragLeave = useCallback((e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        dragCounter.current--;
+        if (dragCounter.current === 0) {
+            setIsDragging(false);
+        }
+    }, []);
+
+    const handleDragOver = useCallback((e) => {
+        e.preventDefault();
+        e.stopPropagation();
+    }, []);
+
+    const handleDrop = useCallback(async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragging(false);
+        dragCounter.current = 0;
+
+        if (!canWrite) {
+            alert('You do not have permission to upload files.');
+            return;
+        }
+
+        const files = e.dataTransfer.files;
+        if (files && files.length > 0) {
+            const file = files[0];
+            if (!file.name.toLowerCase().endsWith('.csv')) {
+                alert('Please drop a CSV file.');
+                return;
+            }
+
+            if (!currentProject) return;
+
+            setIsUploading(true);
+
+            try {
+                const [data] = await Promise.all([
+                    tablesApi.analyzeFile(currentProject.id, file),
+                    new Promise(resolve => setTimeout(resolve, 800))
+                ]);
+
+                setStagingMetadata([{
+                    ...data,
+                    source_type: 'csv',
+                    table_name: data.suggested_table_name,
+                    columns: data.columns
+                }]);
+                setView('edit-metadata');
+
+            } catch (err) {
+                console.error(err);
+                alert("Failed to upload/analyze file.");
+            } finally {
+                setIsUploading(false);
+            }
+        }
+    }, [currentProject, canWrite]);
 
     const handleEditTable = (e, table) => {
         e.stopPropagation();
@@ -605,7 +679,24 @@ const WorkspacePage = () => {
 
     // --- Render ---
     return (
-        <div className="app-container">
+        <div
+            className="app-container"
+            onDragEnter={handleDragEnter}
+            onDragLeave={handleDragLeave}
+            onDragOver={handleDragOver}
+            onDrop={handleDrop}
+        >
+            {/* Drag and Drop Overlay */}
+            {isDragging && canWrite && (
+                <div className="drop-overlay">
+                    <div className="drop-content">
+                        <Upload size={48} />
+                        <h3>Drop CSV file here</h3>
+                        <p>Release to start analyzing</p>
+                    </div>
+                </div>
+            )}
+
             {isUploading && <AnalyzingOverlay />}
 
             <ConfirmationModal

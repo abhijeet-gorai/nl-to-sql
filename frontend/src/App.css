@@ -36,3 +36,40 @@
 .read-the-docs {
   color: #888;
 }
+
+/* Drag and Drop Overlay */
+.drop-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: fadeIn 0.2s ease;
+}
+
+.drop-content {
+  text-align: center;
+  color: white;
+  padding: 3rem;
+  border: 3px dashed var(--accent-primary);
+  border-radius: 16px;
+  background: rgba(99, 102, 241, 0.1);
+}
+
+.drop-content svg {
+  color: var(--accent-primary);
+  margin-bottom: 1rem;
+}
+
+.drop-content h3 {
+  font-size: 1.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.drop-content p {
+  color: var(--text-secondary);
+  font-size: 0.95rem;
+}
