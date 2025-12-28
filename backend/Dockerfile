@@ -6,14 +6,15 @@ WORKDIR /app
 
 # Copy project files
 COPY pyproject.toml uv.lock ./
+
+# Install dependencies
+RUN uv sync --locked
+
 COPY *.py ./
 COPY routers/ ./routers/
 
 # Create charts directory
 RUN mkdir -p charts
-
-# Install dependencies
-RUN uv sync --locked
 
 # Expose port
 EXPOSE 8000
