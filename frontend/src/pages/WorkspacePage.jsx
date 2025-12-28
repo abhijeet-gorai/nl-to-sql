@@ -181,7 +181,9 @@ const WorkspacePage = () => {
             if (err.response?.status === 429) {
                 setShowTokenLimitModal(true);
             } else {
-                alert("Failed to upload/analyze file.");
+                // Show error message from backend if available
+                const errorMsg = err.response?.data?.detail || "Failed to upload/analyze file.";
+                alert(errorMsg);
             }
         } finally {
             setIsUploading(false);
@@ -262,7 +264,9 @@ const WorkspacePage = () => {
                 if (err.response?.status === 429) {
                     setShowTokenLimitModal(true);
                 } else {
-                    alert("Failed to upload/analyze file.");
+                    // Show error message from backend if available
+                    const errorMsg = err.response?.data?.detail || "Failed to upload/analyze file.";
+                    alert(errorMsg);
                 }
             } finally {
                 setIsUploading(false);
