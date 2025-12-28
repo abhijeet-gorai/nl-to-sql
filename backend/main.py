@@ -179,7 +179,7 @@ async def analyze_file_project(
         db_result = db.analyze_csv(temp_filename, file.filename)
 
         try:
-            tables = await db.get_all_tables(project_id)
+            tables = await db.get_all_tables()
             existing_names = [t["table_name"] for t in tables]
 
             ai_metadata, usage_metadata = await agent.generate_table_metadata(
@@ -217,7 +217,7 @@ async def analyze_file_project(
                     col["description"] = ai_cols[col["name"]]
 
             proposed_name = db_result["suggested_table_name"]
-            if await db.check_table_exists(proposed_name, project_id):
+            if await db.check_table_exists(proposed_name):
                 suffix = db.generate_random_suffix()
                 db_result["suggested_table_name"] = f"{proposed_name}_{suffix}"
 
