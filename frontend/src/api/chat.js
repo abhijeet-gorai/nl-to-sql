@@ -38,7 +38,11 @@ export const sendChatMessage = async (projectId, message, selectedTables, thread
             localStorage.removeItem('user');
             window.location.href = '/login';
         }
-        throw new Error(response.statusText);
+        // Create error with response attached for detailed error handling
+        const error = new Error(response.statusText);
+        error.response = response;
+        error.status = response.status;
+        throw error;
     }
 
     return response;

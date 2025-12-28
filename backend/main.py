@@ -171,6 +171,16 @@ async def analyze_file_project(
             
             # Get user_id for per-user LLM credentials
             user_id = access.get("user", {}).get("id")
+            
+            # Determine api_source for token tracking
+            user_creds = await user_credentials.get_credentials(user_id) if user_id else None
+            api_source = "user" if user_creds and user_creds.get("groq_api_key") else "default"
+            
+            # Check daily token limit for users using default API key
+            if user_id and api_source == "default":
+                is_allowed, limit_error = await token_usage.check_daily_limit(user_id, api_source)
+                if not is_allowed:
+                    raise HTTPException(status_code=429, detail=limit_error)
 
             ai_metadata, usage_metadata = await agent.generate_table_metadata(
                 db_result, file.filename, existing_names, user_id=user_id
@@ -188,6 +198,7 @@ async def analyze_file_project(
                         user_id=user_id,
                         source="metadata_generation",
                         usage_metadata=usage_metadata,
+                        api_source=api_source,
                     )
 
             db_result["suggested_table_name"] = ai_metadata.get(
@@ -658,6 +669,16 @@ async def chat_project(
         # Create token logger callback
         user_id = access.get("user", {}).get("id")
         
+        # Determine api_source: 'user' if they have their own key, 'default' otherwise
+        user_creds = await user_credentials.get_credentials(user_id) if user_id else None
+        api_source = "user" if user_creds and user_creds.get("groq_api_key") else "default"
+        
+        # Check daily token limit for users using default API key
+        if user_id and api_source == "default":
+            is_allowed, limit_error = await token_usage.check_daily_limit(user_id, api_source)
+            if not is_allowed:
+                raise HTTPException(status_code=429, detail=limit_error)
+        
         import asyncio
         
         def token_logger(message_id: str, usage_metadata: dict):
@@ -670,6 +691,7 @@ async def chat_project(
                     user_id=user_id,
                     source="chat",
                     usage_metadata=usage_metadata,
+                    api_source=api_source,
                 ))
 
         # Create/update chat session for history (run in background, non-blocking)

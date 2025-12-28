@@ -77,6 +77,9 @@ const WorkspacePage = () => {
     const [isDragging, setIsDragging] = useState(false);
     const dragCounter = useRef(0);
 
+    // Token limit exceeded modal
+    const [showTokenLimitModal, setShowTokenLimitModal] = useState(false);
+
     const initialLoadRef = useRef(false);
 
     // --- Effects ---
@@ -615,6 +618,18 @@ const WorkspacePage = () => {
                 buffer = lines[lines.length - 1];
             }
         } catch (err) {
+            // Handle specific error responses
+            if (err.response || err.status) {
+                const status = err.status || err.response?.status;
+                if (status === 429) {
+                    // Token limit exceeded - show modal instead of chat error
+                    // Remove the empty AI message we added
+                    setMessages(prev => prev.slice(0, -1));
+                    setShowTokenLimitModal(true);
+                    return;
+                }
+            }
+
             setMessages(prev => [...prev, { role: 'error', content: 'Sorry, I encountered an error processing your request.' }]);
             console.error(err);
         } finally {
@@ -865,6 +880,19 @@ const WorkspacePage = () => {
                     loading={sessionsLoading}
                 />
             )}
+
+            {/* Token Limit Exceeded Modal */}
+            <ConfirmationModal
+                isOpen={showTokenLimitModal}
+                title="Daily Token Limit Reached"
+                message="You have exceeded the daily token limit of 50,000 tokens for the free tier. To continue using the chat, please add your own Groq API key."
+                confirmText="Add API Key"
+                onConfirm={() => {
+                    setShowTokenLimitModal(false);
+                    setShowCredentials(true);
+                }}
+                onCancel={() => setShowTokenLimitModal(false)}
+            />
         </div>
     );
 };
