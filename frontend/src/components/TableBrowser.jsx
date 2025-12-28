@@ -5,7 +5,7 @@ import * as connectionsApi from '../api/connections';
 import * as tablesApi from '../api/tables';
 import './TableBrowser.css';
 
-const TableBrowser = ({ projectId, onClose, onTablesSynced }) => {
+const TableBrowser = ({ projectId, onClose, onTablesSynced, onTokenLimitError }) => {
   const [connections, setConnections] = useState([]);
   const [selectedConnection, setSelectedConnection] = useState(null);
   const [schemas, setSchemas] = useState([]);
@@ -166,6 +166,11 @@ const TableBrowser = ({ projectId, onClose, onTablesSynced }) => {
       onClose();
     } catch (e) {
       console.error('Failed to sync tables:', e.response?.data?.detail || e.message);
+      // Check for token limit error (429)
+      if (e.response?.status === 429 && onTokenLimitError) {
+        onTokenLimitError();
+        onClose();
+      }
     } finally {
       setSyncing(false);
     }

@@ -104,27 +104,49 @@ async def log_token_usage(
 
 async def get_user_daily_usage(user_id: int, api_source: str = "default") -> Dict:
     """
-    Get user's token usage for today (using default API key).
+    Get user's token usage for last 24 hours (using default API key).
+    
+    For 'chat' source: Only count the latest row per thread (current context size)
+    For other sources: Sum all tokens
     
     Returns:
-        Dict with total_tokens used today and remaining quota
+        Dict with total_tokens used in last 24 hours and remaining quota
     """
+    # For chat source, we only want the latest row per session (current context size)
+    # For other sources (metadata_generation), we sum all tokens
     row = await fetchrow(
         """
-        SELECT COALESCE(SUM(total_tokens), 0) as tokens_used_today
-        FROM token_usage
-        WHERE user_id = $1 
-          AND api_source = $2
-          AND created_at >= CURRENT_DATE
+        WITH chat_latest AS (
+            -- Get only the latest row per session for chat source
+            SELECT DISTINCT ON (session_id) total_tokens
+            FROM token_usage
+            WHERE user_id = $1 
+              AND api_source = $2
+              AND source = 'chat'
+              AND created_at >= NOW() - INTERVAL '24 hours'
+            ORDER BY session_id, created_at DESC
+        ),
+        other_sources AS (
+            -- Sum all tokens for non-chat sources
+            SELECT COALESCE(SUM(total_tokens), 0) as total_tokens
+            FROM token_usage
+            WHERE user_id = $1 
+              AND api_source = $2
+              AND source != 'chat'
+              AND created_at >= NOW() - INTERVAL '24 hours'
+        )
+        SELECT 
+            COALESCE((SELECT SUM(total_tokens) FROM chat_latest), 0) + 
+            COALESCE((SELECT total_tokens FROM other_sources), 0) as tokens_used_24h
         """,
         user_id, api_source
     )
     
-    tokens_used = row["tokens_used_today"] if row else 0
+    tokens_used = row["tokens_used_24h"] if row else 0
     remaining = max(0, DEFAULT_API_DAILY_TOKEN_LIMIT - tokens_used)
     
     return {
-        "tokens_used_today": tokens_used,
+        "tokens_used_24h": tokens_used,
         "daily_limit": DEFAULT_API_DAILY_TOKEN_LIMIT,
         "tokens_remaining": remaining,
         "limit_exceeded": tokens_used >= DEFAULT_API_DAILY_TOKEN_LIMIT,

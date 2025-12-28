@@ -158,6 +158,19 @@ async def analyze_file_project(
     if not file.filename.endswith(".csv"):
         raise HTTPException(status_code=400, detail="Only CSV files are allowed.")
 
+    # Get user_id for per-user LLM credentials
+    user_id = access.get("user", {}).get("id")
+    
+    # Determine api_source for token tracking
+    user_creds = await user_credentials.get_credentials(user_id) if user_id else None
+    api_source = "user" if user_creds and user_creds.get("groq_api_key") else "default"
+    
+    # Check daily token limit for users using default API key
+    if user_id and api_source == "default":
+        is_allowed, limit_error = await token_usage.check_daily_limit(user_id, api_source)
+        if not is_allowed:
+            raise HTTPException(status_code=429, detail=limit_error)
+
     temp_filename = f"temp_{uuid.uuid4()}.csv"
     try:
         with open(temp_filename, "wb") as buffer:
@@ -168,19 +181,6 @@ async def analyze_file_project(
         try:
             tables = await db.get_all_tables(project_id)
             existing_names = [t["table_name"] for t in tables]
-            
-            # Get user_id for per-user LLM credentials
-            user_id = access.get("user", {}).get("id")
-            
-            # Determine api_source for token tracking
-            user_creds = await user_credentials.get_credentials(user_id) if user_id else None
-            api_source = "user" if user_creds and user_creds.get("groq_api_key") else "default"
-            
-            # Check daily token limit for users using default API key
-            if user_id and api_source == "default":
-                is_allowed, limit_error = await token_usage.check_daily_limit(user_id, api_source)
-                if not is_allowed:
-                    raise HTTPException(status_code=429, detail=limit_error)
 
             ai_metadata, usage_metadata = await agent.generate_table_metadata(
                 db_result, file.filename, existing_names, user_id=user_id
@@ -545,6 +545,16 @@ async def sync_tables_project(
         raise HTTPException(
             status_code=404, detail="Connection not found in this project"
         )
+
+    # Check token limit for users using default API key
+    user_id = access.get("user", {}).get("id")
+    user_creds = await user_credentials.get_credentials(user_id) if user_id else None
+    api_source = "user" if user_creds and user_creds.get("groq_api_key") else "default"
+    
+    if user_id and api_source == "default":
+        is_allowed, limit_error = await token_usage.check_daily_limit(user_id, api_source)
+        if not is_allowed:
+            raise HTTPException(status_code=429, detail=limit_error)
 
     try:
         success = await me.sync_external_tables(connection_id, request.tables, project_id)

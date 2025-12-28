@@ -177,7 +177,12 @@ const WorkspacePage = () => {
 
         } catch (err) {
             console.error(err);
-            alert("Failed to upload/analyze file.");
+            // Check for token limit error (429)
+            if (err.response?.status === 429) {
+                setShowTokenLimitModal(true);
+            } else {
+                alert("Failed to upload/analyze file.");
+            }
         } finally {
             setIsUploading(false);
             if (e.target) e.target.value = null;
@@ -253,7 +258,12 @@ const WorkspacePage = () => {
 
             } catch (err) {
                 console.error(err);
-                alert("Failed to upload/analyze file.");
+                // Check for token limit error (429)
+                if (err.response?.status === 429) {
+                    setShowTokenLimitModal(true);
+                } else {
+                    alert("Failed to upload/analyze file.");
+                }
             } finally {
                 setIsUploading(false);
             }
@@ -846,6 +856,7 @@ const WorkspacePage = () => {
                     projectId={currentProject?.id}
                     onClose={() => setShowTableBrowser(false)}
                     onTablesSynced={handleTablesSynced}
+                    onTokenLimitError={() => setShowTokenLimitModal(true)}
                 />
             )}
 
