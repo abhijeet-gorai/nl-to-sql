@@ -149,9 +149,57 @@ async def verify_email_token(token: str) -> dict:
     if await mark_email_verified(token_data["user_id"]):
         # Delete the used token
         await delete_verification_token(token)
+        
+        # Grant read access to sample project (project_id = 4)
+        await _grant_sample_project_access(token_data["user_id"])
+        
         return {"success": True, "message": "Email verified successfully"}
 
     return {"success": False, "message": "Failed to verify email"}
+
+
+async def _grant_sample_project_access(user_id: int):
+    """
+    Grant read-only access to the Sample Project for new verified users.
+    Sample Project ID is 4 - verify it exists and has the correct name before granting access.
+    """
+    SAMPLE_PROJECT_ID = 4
+    SAMPLE_PROJECT_NAME = "Sample Project"
+    
+    try:
+        # Verify the sample project exists with the correct name
+        row = await fetchrow(
+            "SELECT id, name, created_by FROM projects WHERE id = $1",
+            SAMPLE_PROJECT_ID
+        )
+        
+        if not row or row["name"] != SAMPLE_PROJECT_NAME:
+            print(f"Sample project not found or name mismatch. Expected '{SAMPLE_PROJECT_NAME}' at ID {SAMPLE_PROJECT_ID}")
+            return
+        
+        # Check if user is already a member
+        existing = await fetchrow(
+            "SELECT id FROM project_members WHERE project_id = $1 AND user_id = $2",
+            SAMPLE_PROJECT_ID, user_id
+        )
+        
+        if existing:
+            # User already has access
+            return
+        
+        # Add user as viewer
+        await execute(
+            """
+            INSERT INTO project_members (project_id, user_id, role, added_by)
+            VALUES ($1, $2, 'viewer', $3)
+            """,
+            SAMPLE_PROJECT_ID, user_id, row["created_by"]
+        )
+        print(f"Granted read access to Sample Project for user {user_id}")
+        
+    except Exception as e:
+        # Don't fail verification if sample project access fails
+        print(f"Failed to grant sample project access: {e}")
 
 
 def _get_email_content(username: str, verification_link: str) -> tuple[str, str]:
