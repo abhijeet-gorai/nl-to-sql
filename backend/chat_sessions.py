@@ -108,19 +108,30 @@ def _convert_to_ist(dt) -> str:
         return str(dt) if dt else None
 
 
-async def get_project_sessions(project_id: int) -> List[Dict]:
+async def get_project_sessions(project_id: int, user_id: int = None) -> List[Dict]:
     """
-    Get all chat sessions for a project, ordered by most recent.
+    Get all chat sessions for a project, optionally filtered by user, ordered by most recent.
     """
-    rows = await fetch(
-        """
-        SELECT id, project_id, thread_id, user_id, title, created_at, updated_at
-        FROM chat_sessions
-        WHERE project_id = $1
-        ORDER BY updated_at DESC
-        """,
-        project_id
-    )
+    if user_id:
+        rows = await fetch(
+            """
+            SELECT id, project_id, thread_id, user_id, title, created_at, updated_at
+            FROM chat_sessions
+            WHERE project_id = $1 AND user_id = $2
+            ORDER BY updated_at DESC
+            """,
+            project_id, user_id
+        )
+    else:
+        rows = await fetch(
+            """
+            SELECT id, project_id, thread_id, user_id, title, created_at, updated_at
+            FROM chat_sessions
+            WHERE project_id = $1
+            ORDER BY updated_at DESC
+            """,
+            project_id
+        )
 
     sessions = []
     for row in rows:

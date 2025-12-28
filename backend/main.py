@@ -775,8 +775,9 @@ async def list_chat_sessions(
     project_id: int,
     access: dict = Depends(require_read_access),
 ):
-    """Get all chat sessions for a project (for chat history)"""
-    return await chat_sessions.get_project_sessions(project_id)
+    """Get chat sessions for a project initiated by the current user"""
+    user_id = access.get("user", {}).get("id")
+    return await chat_sessions.get_project_sessions(project_id, user_id)
 
 
 @app.get("/projects/{project_id}/chat-sessions/{thread_id}")
