@@ -3,13 +3,61 @@ import os
 import json
 import random
 import string
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Iterable
 import asyncpg
 
 from database_config import get_connection, execute, fetch, fetchrow, fetchval, get_connection_string
 from sql_utils import is_read_only_sql
 
 METADATA_TABLE = "app_metadata"
+
+# Default encodings to try when reading CSV files
+DEFAULT_CSV_ENCODINGS = ["utf-8", "utf-8-sig", "cp1252", "latin1", "iso-8859-1"]
+
+
+def read_csv_with_fallback_encodings(
+    path: str,
+    encodings: Optional[Iterable[str]] = None,
+    **read_csv_kwargs
+) -> pd.DataFrame:
+    """
+    Read a CSV file by trying multiple encodings until one succeeds.
+
+    Parameters
+    ----------
+    path : str
+        Path to the CSV file.
+    encodings : iterable of str, optional
+        Encodings to try. Defaults to common encodings.
+    **read_csv_kwargs
+        Additional keyword arguments passed to pd.read_csv
+
+    Returns
+    -------
+    pd.DataFrame
+        Loaded DataFrame.
+
+    Raises
+    ------
+    ValueError
+        If none of the encodings work.
+    """
+    if encodings is None:
+        encodings = DEFAULT_CSV_ENCODINGS
+
+    last_error = None
+
+    for enc in encodings:
+        try:
+            df = pd.read_csv(path, encoding=enc, **read_csv_kwargs)
+            return df
+        except UnicodeDecodeError as e:
+            last_error = e
+            continue
+
+    raise ValueError(
+        f"Could not decode CSV with any of the supported encodings: {list(encodings)}"
+    ) from last_error
 
 
 async def init_db():
@@ -64,11 +112,11 @@ def analyze_csv(file_path: str, original_filename: str) -> Dict:
     Does NOT create the table yet.
     """
     try:
-        # Read a subset to infer types and preview
-        df_preview = pd.read_csv(file_path, nrows=5)
+        # Read a subset to infer types and preview (with encoding fallback)
+        df_preview = read_csv_with_fallback_encodings(file_path, nrows=5)
         df_preview.columns = [c.strip().replace(" ", "_").lower() for c in df_preview.columns]
         # Read 0 rows to get columns cheaply
-        df_headers = pd.read_csv(file_path, nrows=0)
+        df_headers = read_csv_with_fallback_encodings(file_path, nrows=0)
         df_headers.columns = [c.strip().replace(" ", "_").lower() for c in df_headers.columns]
 
         columns = []
@@ -88,10 +136,15 @@ def analyze_csv(file_path: str, original_filename: str) -> Dict:
 
         preview = df_preview.fillna("").to_dict(orient="records")
 
-        # Quick row count
+        # Quick row count (try multiple encodings)
         row_count = 0
-        with open(file_path, "r", encoding="utf-8") as f:
-            row_count = sum(1 for _ in f) - 1
+        for enc in DEFAULT_CSV_ENCODINGS:
+            try:
+                with open(file_path, "r", encoding=enc) as f:
+                    row_count = sum(1 for _ in f) - 1
+                break
+            except UnicodeDecodeError:
+                continue
 
         suggested_name = generate_table_name(original_filename)
 
@@ -116,7 +169,7 @@ async def register_table(file_path: str, metadata: Dict, project_id: int = None)
     table_name = metadata["table_name"]
 
     try:
-        df = pd.read_csv(file_path)
+        df = read_csv_with_fallback_encodings(file_path)
 
         # Sanitize columns in DF to match metadata names if we allow renaming later
         # For now, just ensuring valid SQL identifiers
