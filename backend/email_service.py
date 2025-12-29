@@ -191,7 +191,7 @@ async def _grant_sample_project_access(user_id: int):
         await execute(
             """
             INSERT INTO project_members (project_id, user_id, role, added_by)
-            VALUES ($1, $2, 'viewer', $3)
+            VALUES ($1, $2, 'read', $3)
             """,
             SAMPLE_PROJECT_ID, user_id, row["created_by"]
         )
